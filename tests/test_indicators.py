@@ -249,5 +249,69 @@ class TestEmailNotifier(unittest.TestCase):
             del os.environ["GMAIL_USER"], os.environ["GMAIL_APP_PASSWORD"]
 
 
+class TestMultipleRecipients(unittest.TestCase):
+    def test_parses_mixed_separators_and_dedupes(self):
+        from bot.notify_email import _parse_recipients
+
+        self.assertEqual(
+            _parse_recipients("a@x.com, b@y.com; a@x.com\nc@z.com"),
+            ["a@x.com", "b@y.com", "c@z.com"],
+        )
+
+    def test_single_recipient_goes_in_to(self):
+        msg = self._build("only@x.com")
+        self.assertEqual(msg["To"], "only@x.com")
+        self.assertIsNone(msg["Bcc"])
+
+    def test_multiple_recipients_go_in_bcc(self):
+        """받는 사람들끼리 서로의 주소가 보이면 동의 없는 개인정보 제공이 된다."""
+        msg = self._build("a@x.com, b@y.com, c@z.com")
+        self.assertEqual(msg["To"], "me@gmail.com")
+        self.assertEqual(msg["Bcc"], "a@x.com, b@y.com, c@z.com")
+
+    def test_name_shows_recipient_count(self):
+        from bot.notify_email import EmailNotifier
+
+        self.assertEqual(EmailNotifier("me@g.com", "pw", "a@x.com").name, "이메일")
+        self.assertEqual(EmailNotifier("me@g.com", "pw", "a@x.com,b@y.com").name, "이메일(2명)")
+
+    def _build(self, to):
+        import bot.notify_email as mod
+        from bot.notify_email import EmailNotifier
+        from bot.signals import Signal
+
+        box = {}
+
+        class FakeSMTP:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def starttls(self, **k):
+                pass
+
+            def login(self, *a):
+                pass
+
+            def send_message(self, msg):
+                box["msg"] = msg
+
+        saved = mod.smtplib.SMTP
+        mod.smtplib.SMTP = FakeSMTP
+        try:
+            EmailNotifier("me@gmail.com", "pw", to).send_signal(
+                "BTCUSDT",
+                Signal("SELL", 1787677200000, 79194.9, 79255.33, 79257.34, 39.6, 115.74, 255.45, ""),
+            )
+        finally:
+            mod.smtplib.SMTP = saved
+        return box["msg"]
+
+
 if __name__ == "__main__":
     unittest.main()

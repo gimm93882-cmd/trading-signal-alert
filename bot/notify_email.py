@@ -28,12 +28,11 @@ from datetime import datetime
 
 
 class EmailNotifier:
-    name = "이메일"
-
     def __init__(self, user, password, to):
         self.user = user
         self.password = password
-        self.to = to
+        # to 는 한 명일 수도, 쉼표로 구분된 여러 명일 수도 있다.
+        self.recipients = _parse_recipients(to) or [user]
 
     @classmethod
     def from_env(cls):
@@ -44,6 +43,11 @@ class EmailNotifier:
             return None
         to = os.environ.get(ENV_TO, "").strip() or user
         return cls(user, password, to)
+
+    @property
+    def name(self):
+        n = len(self.recipients)
+        return "이메일" if n == 1 else "이메일(%d명)" % n
 
     def send_signal(self, symbol: str, sig: Signal) -> None:
         style = STYLE[sig.kind]
@@ -96,7 +100,16 @@ class EmailNotifier:
         msg = EmailMessage()
         msg["Subject"] = subject
         msg["From"] = self.user
-        msg["To"] = self.to
+
+        # 수신자가 여러 명이면 반드시 숨은참조로 보낸다.
+        # To 에 나열하면 받는 사람들끼리 서로의 이메일 주소를 전부 보게 되고,
+        # 그건 동의 없는 개인정보 제3자 제공에 해당한다.
+        if len(self.recipients) == 1:
+            msg["To"] = self.recipients[0]
+        else:
+            msg["To"] = self.user
+            msg["Bcc"] = ", ".join(self.recipients)
+
         msg.set_content(body)
 
         try:
@@ -105,6 +118,8 @@ class EmailNotifier:
                 smtp.starttls(context=ctx)
                 smtp.login(self.user, self.password)
                 smtp.send_message(msg)
+        except smtplib.SMTPRecipientsRefused as err:
+            raise NotifyError("수신 거부된 주소가 있습니다: " + str(err.recipients))
         except smtplib.SMTPAuthenticationError:
             raise NotifyError(
                 "Gmail 로그인 실패. 일반 비밀번호가 아니라 **앱 비밀번호**(16자리)여야 합니다.\n"
@@ -112,3 +127,15 @@ class EmailNotifier:
             )
         except (smtplib.SMTPException, OSError) as err:
             raise NotifyError("메일 전송 실패: " + str(err))
+
+
+def _parse_recipients(raw):
+    """쉼표·세미콜론·줄바꿈 아무거나로 구분된 주소 목록을 정리한다."""
+    if not raw:
+        return []
+    out = []
+    for chunk in raw.replace(";", ",").replace("\n", ",").split(","):
+        addr = chunk.strip()
+        if addr and addr not in out:
+            out.append(addr)
+    return out
