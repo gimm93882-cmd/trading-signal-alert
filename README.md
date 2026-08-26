@@ -35,6 +35,42 @@ Pine 스크립트로 만든 알림은 전부 "기술적 알림"이라 **무료 �
 핸드폰 푸시를 받으려면 디스코드 모바일 앱에서 해당 채널의 알림을
 **모든 메시지**로 켜두면 됩니다.
 
+### 1-2. 이메일 알림 추가 (선택, 무료)
+
+디스코드와 **같은 신호를 이메일로도** 받을 수 있습니다. 둘 다 켜두면 한쪽이 막혀도
+다른 쪽이 도착합니다. Gmail 앱의 푸시 알림을 쓰는 방식이라 비용이 들지 않습니다.
+
+푸시 알림에 실제로 보이는 건 **제목 한 줄**이라, 제목에 다 담았습니다.
+
+```
+🟥 SELL · BTCUSDT · 79,194.90
+```
+
+Gmail 은 일반 계정 비밀번호로 SMTP 로그인이 되지 않습니다. **앱 비밀번호**가 필요합니다.
+
+1. https://myaccount.google.com/security → **2단계 인증**을 먼저 켭니다 (이게 켜져야 다음이 보입니다)
+2. https://myaccount.google.com/apppasswords 접속
+3. 앱 이름에 `trading-alert` 같은 이름을 넣고 **만들기**
+4. 화면에 뜨는 **16자리**를 복사 (`abcd efgh ijkl mnop` 형태 — 띄어쓰기는 있어도 됩니다)
+
+이 16자리는 창을 닫으면 다시 볼 수 없습니다. 계정 비밀번호가 아니라 이 앱 전용 비밀번호이고,
+언제든 위 페이지에서 폐기할 수 있습니다.
+
+로컬 테스트:
+
+```bash
+export GMAIL_USER='본인@gmail.com'
+export GMAIL_APP_PASSWORD='앱비밀번호16자리'
+python3 -m bot.main
+```
+
+받는 주소를 따로 두려면 `MAIL_TO` 를 추가로 지정합니다. 없으면 `GMAIL_USER` 로 갑니다.
+
+폰에서 Gmail 앱 → 설정 → 계정 → **알림**을 켜두세요. 그 발신자만 콕 집어
+알림받으려면 Gmail 필터에서 **중요 표시**로 지정하면 됩니다.
+
+---
+
 ### 2. 로컬에서 먼저 확인
 
 ```bash
@@ -76,8 +112,11 @@ git branch -M main && git push -u origin main
 그다음 GitHub 저장소 페이지에서:
 
 1. **Settings → Secrets and variables → Actions → New repository secret**
-   - Name: `DISCORD_WEBHOOK_URL`
-   - Secret: 1번에서 복사한 URL
+   - `DISCORD_WEBHOOK_URL` — 1번에서 복사한 웹훅 URL
+   - (이메일도 쓴다면) `GMAIL_USER`, `GMAIL_APP_PASSWORD`, 필요하면 `MAIL_TO`
+
+   디스코드와 이메일 중 **하나만 등록해도 됩니다.** 등록된 채널로만 나갑니다.
+   둘 다 없으면 봇이 오류로 멈추면서 어떤 값이 필요한지 알려줍니다.
 2. **Settings → Actions → General → Workflow permissions**
    → **Read and write permissions** 선택 후 저장
    (봇이 `state.json`을 커밋해야 중복 알림이 안 갑니다)
@@ -221,9 +260,10 @@ bot/
   bitget.py       공개 캔들 API (인증 불필요)
   indicators.py   EMA / Stoch / MACD — TradingView와 수치가 일치해야 하는 부분
   signals.py      신호 판정 (COVER 버그 수정 지점)
-  notify.py       디스코드 전송
+  notify.py       디스코드 전송 + 채널 디스패처
+  notify_email.py Gmail SMTP 전송
   main.py         엔트리포인트
-tests/            지표 검증 18건
+tests/            지표 · 알림 검증 23건
 pine/             수정된 TradingView 스크립트
 state.json        마지막으로 처리한 봉 (중복 알림 방지)
 ```

@@ -29,14 +29,16 @@ def main(argv=None):
     if args.backfill:
         return _backfill(symbols, args.backfill)
 
-    url = None if args.dry_run else notify.webhook_url()
+    senders = [] if args.dry_run else notify.build_senders()
+    if senders:
+        print("알림 채널: " + ", ".join(x.name for x in senders))
 
     state = _load_state()
     failures = []
 
     for symbol in symbols:
         try:
-            _run_symbol(symbol, state, url, args.dry_run)
+            _run_symbol(symbol, state, senders, args.dry_run)
         except (BitgetError, notify.NotifyError) as err:
             print("[%s] 실패: %s" % (symbol, err), file=sys.stderr)
             failures.append(symbol)
@@ -50,7 +52,7 @@ def main(argv=None):
     return 0
 
 
-def _run_symbol(symbol, state, url, dry_run):
+def _run_symbol(symbol, state, senders, dry_run):
     candles = fetch_candles(
         symbol,
         config.GRANULARITY,
@@ -96,12 +98,13 @@ def _run_symbol(symbol, state, url, dry_run):
             for s in fresh:
                 print("    " + _line(s))
         else:
-            notify.send_backlog_summary(symbol, fresh, url)
+            for sender in senders:
+                sender.send_backlog_summary(symbol, fresh)
     else:
         for s in fresh:
             print("[%s] %s" % (symbol, _line(s)))
-            if not dry_run:
-                notify.send_signal(symbol, s, url)
+            for sender in senders:
+                sender.send_signal(symbol, s)
 
     state[symbol]["last_bar"] = newest
 

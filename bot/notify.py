@@ -155,3 +155,42 @@ def _post(url, payload, attempt=0):
             time.sleep(2 ** attempt)
             return _post(url, payload, attempt + 1)
         raise NotifyError("디스코드 전송 실패: " + str(err))
+
+
+# --- 채널 디스패처 -----------------------------------------------------------
+
+class DiscordNotifier:
+    name = "디스코드"
+
+    def __init__(self, url):
+        self.url = url
+
+    @classmethod
+    def from_env(cls):
+        url = os.environ.get(ENV_KEY, "").strip()
+        return cls(url) if url else None
+
+    def send_signal(self, symbol, sig):
+        send_signal(symbol, sig, self.url)
+
+    def send_backlog_summary(self, symbol, signals):
+        send_backlog_summary(symbol, signals, self.url)
+
+
+def build_senders():
+    """환경변수를 보고 활성화된 알림 채널을 모은다.
+
+    디스코드와 이메일을 둘 다 설정하면 같은 신호가 양쪽으로 나간다.
+    한쪽이 막혀도 다른 쪽이 도착하도록 하는 게 목적이다.
+    """
+    from .notify_email import EmailNotifier
+
+    senders = [n for n in (DiscordNotifier.from_env(), EmailNotifier.from_env()) if n]
+    if not senders:
+        raise NotifyError(
+            "알림 채널이 하나도 설정되지 않았습니다.\n"
+            "  디스코드: " + ENV_KEY + "\n"
+            "  이메일  : GMAIL_USER + GMAIL_APP_PASSWORD (+ 선택 MAIL_TO)\n"
+            "둘 중 하나 이상을 환경변수 또는 GitHub Secret 으로 설정하세요."
+        )
+    return senders

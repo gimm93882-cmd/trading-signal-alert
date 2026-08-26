@@ -183,5 +183,71 @@ class TestCoverBugFix(unittest.TestCase):
         self.assertTrue(short.reason, "SHORT 은 트리거 사유가 있어야 한다")
 
 
+class TestEmailNotifier(unittest.TestCase):
+    """푸시 알림에 실제로 보이는 건 제목 한 줄이므로, 제목 형식을 고정한다."""
+
+    def _sig(self, kind="SELL"):
+        from bot.signals import Signal
+
+        return Signal(
+            kind=kind, bar_time=1787677200000, close=79194.9,
+            ema_short=79255.33, ema_long=79257.34, stoch_k=39.6,
+            macd=115.74, macd_signal=255.45, reason="",
+        )
+
+    def _capture(self, sig, symbol="BTCUSDT"):
+        from bot.notify_email import EmailNotifier
+
+        box = {}
+        n = EmailNotifier("me@gmail.com", "pw", "me@gmail.com")
+        n._send = lambda s, b: box.update(subject=s, body=b)
+        n.send_signal(symbol, sig)
+        return box
+
+    def test_subject_carries_signal_symbol_and_price(self):
+        box = self._capture(self._sig())
+        self.assertIn("SELL", box["subject"])
+        self.assertIn("BTCUSDT", box["subject"])
+        self.assertIn("79,194.90", box["subject"])
+
+    def test_body_has_indicator_values(self):
+        body = self._capture(self._sig())["body"]
+        for expected in ("79,255.33", "79,257.34", "39.6", "115.74", "255.45"):
+            self.assertIn(expected, body)
+
+    def test_reason_appears_only_when_present(self):
+        self.assertNotIn("트리거", self._capture(self._sig())["body"])
+
+        sig = self._sig("SHORT")
+        sig.reason = "MACD 약세 다이버전스"
+        self.assertIn("MACD 약세 다이버전스", self._capture(sig)["body"])
+
+    def test_from_env_is_none_without_credentials(self):
+        import os
+
+        from bot.notify_email import EmailNotifier
+
+        saved = {k: os.environ.pop(k, None) for k in ("GMAIL_USER", "GMAIL_APP_PASSWORD")}
+        try:
+            self.assertIsNone(EmailNotifier.from_env())
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
+    def test_app_password_spaces_are_stripped(self):
+        """구글이 앱 비밀번호를 'abcd efgh ijkl mnop' 형태로 보여줘서 그대로 붙여넣기 쉽다."""
+        import os
+
+        from bot.notify_email import EmailNotifier
+
+        os.environ["GMAIL_USER"] = "me@gmail.com"
+        os.environ["GMAIL_APP_PASSWORD"] = "abcd efgh ijkl mnop"
+        try:
+            self.assertEqual(EmailNotifier.from_env().password, "abcdefghijklmnop")
+        finally:
+            del os.environ["GMAIL_USER"], os.environ["GMAIL_APP_PASSWORD"]
+
+
 if __name__ == "__main__":
     unittest.main()
