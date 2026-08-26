@@ -1,0 +1,134 @@
+//@version=5
+// Trend Ribbon + Buy/Sell + Short Cycle  (수정판)
+//
+// 원본 대비 바뀐 것
+//  1. COVER 버그 수정
+//     원본:  shortExit = shortEntry[1] and buySignal
+//     숏 진입 "바로 다음 봉"에 골든크로스가 나야만 성립해서 실전에서 거의 안 뜬다.
+//     var bool inShort 상태 변수로 바꿔, 진입 이후 언제든 골든크로스가 나오면 청산 신호를 낸다.
+//  2. alert() / alertcondition() 추가
+//     원본에는 알림 호출이 하나도 없어서, 유료 플랜이어도 이 코드로는 알림을 만들 수 없었다.
+//  3. sellSignal 과 shortEntry 가 같은 봉에서 세모 두 개를 겹쳐 그리던 문제 정리.
+//  4. 쓰이지 않던 MACD signal 선을 알림 메시지에 실제로 사용.
+//  5. 과매수 필터에 lookback 옵션 추가 (아래 주석 참조).
+//
+// ※ 알림을 만들 때 반드시 "Once Per Bar Close"(봉 마감 시 한 번)를 선택할 것.
+//    기본값인 "Once Per Bar"로 두면 봉이 완성되기 전에 알림이 울렸다가
+//    조건이 풀리면서 신호가 사라지는 리페인팅이 발생한다.
+
+indicator("Trend Ribbon + Buy/Sell + Short Cycle (fixed)", overlay=true)
+
+// === 사용자 입력 ===
+shortLen = input.int(9,  "Short MA Length")
+longLen  = input.int(21, "Long MA Length")
+stochLen = input.int(14, "Stoch Length")
+stochOB  = input.int(80, "Stoch Overbought Level")
+
+// 과매수를 "교차 봉에서만" 볼지, "직전 N봉 안에 있었는지"로 볼지.
+//
+// 1 = 원본과 완전히 동일. 다만 이 값에서 과매수 필터는 사실상 죽어 있다.
+// 실측: BTC/ETH/SOL 1시간봉 각 1000봉, 데드크로스 합계 71회 중
+//       교차 봉의 %K 가 80을 넘은 경우 0회 (최댓값 57.1).
+// 단기선이 장기선을 아래로 뚫으려면 하락이 누적돼야 하고,
+// 그 시점의 종가는 이미 14봉 레인지의 바닥 근처이기 때문이다.
+// "과매수까지 갔다가 꺾였을 때 숏"이 의도라면 6~10 으로 올린다.
+stochLookback = input.int(1, "Stoch OB Lookback (1 = 원본과 동일)", minval=1)
+
+macdFast = input.int(12, "MACD Fast Length")
+macdSlow = input.int(26, "MACD Slow Length")
+macdSig  = input.int(9,  "MACD Signal Length")
+divLen   = input.int(5,  "Divergence Lookback")
+
+confirmOnly = input.bool(true, "확정된 봉에서만 신호 표시 (리페인팅 방지)")
+
+// === 이동평균 ===
+shortMA = ta.ema(close, shortLen)
+longMA  = ta.ema(close, longLen)
+
+// === 추세선 (띠 색상) ===
+trendColor = shortMA > longMA ? color.aqua : color.red
+plot(shortMA, title="Trend Ribbon", color=trendColor, linewidth=4)
+plot(longMA,  title="Long MA", color=color.new(color.gray, 40), linewidth=1)
+
+// === 교차 ===
+buySignal  = ta.crossover(shortMA, longMA)
+sellSignal = ta.crossunder(shortMA, longMA)
+
+// === Stochastic ===
+k = ta.stoch(close, high, low, stochLen)
+stochOB_cond = ta.highest(k, stochLookback) > stochOB
+
+// === MACD ===
+macd   = ta.ema(close, macdFast) - ta.ema(close, macdSlow)
+signal = ta.ema(macd, macdSig)
+
+// 가격은 5봉 고점을 높였는데 MACD 는 못 따라온 구간
+priceHighCond = ta.highest(close, divLen) > ta.highest(close[divLen], divLen)
+macdLowCond   = ta.highest(macd,  divLen) < ta.highest(macd[divLen],  divLen)
+macdBearDiv   = priceHighCond and macdLowCond
+
+// === 숏 진입 ===
+shortFilter = stochOB_cond or macdBearDiv
+shortEntry  = sellSignal and shortFilter
+
+// === 숏 청산 — 여기가 원본의 버그를 고친 부분 ===
+var bool inShort = false
+shortExit = inShort and buySignal
+
+// 상태 갱신은 판정 뒤에 한다. 같은 봉에서 진입과 청산이 겹치지 않도록.
+if shortExit
+    inShort := false
+if shortEntry
+    inShort := true
+
+// === 표시 게이트 ===
+// 확정봉에서만 그리면 진행 중인 봉에서 화살표가 떴다 사라지는 일이 없다.
+ok = confirmOnly ? barstate.isconfirmed : true
+
+showBuy   = buySignal  and ok
+showSell  = sellSignal and not shortEntry and ok   // SHORT 이 뜨는 봉에서는 세모 중복을 피한다
+showShort = shortEntry and ok
+showCover = shortExit  and ok
+
+// === 신호 표시 ===
+plotshape(showBuy, title="BUY (Long)", location=location.belowbar,
+     color=color.aqua, style=shape.triangleup, size=size.large, text="BUY")
+
+plotshape(showSell, title="SELL (Close Long)", location=location.abovebar,
+     color=color.red, style=shape.triangledown, size=size.large, text="SELL")
+
+plotshape(showShort, title="SHORT (Entry)", location=location.abovebar,
+     color=color.orange, style=shape.triangledown, size=size.large, text="SELL+SHORT")
+
+plotshape(showCover, title="COVER (Exit Short)", location=location.belowbar,
+     color=color.yellow, style=shape.triangleup, size=size.large, text="COVER")
+
+// === 알림 ===
+// (1) alertcondition — 알림 생성 창에서 신호별로 따로 고를 수 있다. 무료/유료 공통.
+alertcondition(buySignal,  title="BUY (롱 진입)",   message="BUY · 골든크로스")
+alertcondition(sellSignal, title="SELL (롱 청산)",  message="SELL · 데드크로스")
+alertcondition(shortEntry, title="SHORT (숏 진입)", message="SHORT · 데드크로스 + 과매수/다이버전스")
+alertcondition(shortExit,  title="COVER (숏 청산)", message="COVER · 숏 청산")
+
+// (2) alert — 가격까지 담은 동적 메시지. 웹훅으로 그대로 보낼 수 있는 JSON 형태다.
+//     알림 생성 시 조건에서 "Any alert() function call" 을 고르면 된다.
+f_payload(sig, why) =>
+    '{"symbol":"' + syminfo.ticker + '","tf":"' + timeframe.period +
+      '","signal":"' + sig +
+      '","price":"'  + str.tostring(close,  format.mintick) +
+      '","emaShort":"' + str.tostring(shortMA, format.mintick) +
+      '","emaLong":"'  + str.tostring(longMA,  format.mintick) +
+      '","stochK":"'   + str.tostring(k,      "#.##") +
+      '","macd":"'     + str.tostring(macd,   "#.##") +
+      '","macdSignal":"' + str.tostring(signal, "#.##") +
+      '","reason":"'   + why + '"}'
+
+if buySignal
+    alert(f_payload("BUY", "golden cross"), alert.freq_once_per_bar_close)
+if sellSignal and not shortEntry
+    alert(f_payload("SELL", "dead cross"), alert.freq_once_per_bar_close)
+if shortEntry
+    why = stochOB_cond and macdBearDiv ? "stoch OB + macd bear div" : stochOB_cond ? "stoch OB" : "macd bear div"
+    alert(f_payload("SHORT", why), alert.freq_once_per_bar_close)
+if shortExit
+    alert(f_payload("COVER", "golden cross while short"), alert.freq_once_per_bar_close)

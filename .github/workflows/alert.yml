@@ -1,0 +1,48 @@
+name: 1H signal alert
+
+on:
+  schedule:
+    # 매시 02분(UTC). 1시간봉은 UTC 정각 = KST 정각에 마감하므로 KST 기준으로도 매시 02분이다.
+    # GitHub 부하에 따라 5~15분 밀릴 수 있다. 1시간봉이라 실사용에는 지장이 없다.
+    - cron: "2 * * * *"
+  workflow_dispatch:        # Actions 탭에서 수동 실행
+
+concurrency:
+  # 앞선 실행이 밀려서 겹치면 state.json 을 동시에 건드리게 된다. 한 번에 하나만.
+  group: signal-alert
+  cancel-in-progress: false
+
+permissions:
+  contents: write           # state.json 커밋용
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 외부 패키지를 쓰지 않으므로 설치 단계가 없다.
+      - name: 테스트
+        run: python -m unittest discover -s tests
+
+      - name: 신호 확인 및 전송
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python -m bot.main
+
+      - name: state.json 저장
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state.json
+            git commit -m "state: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git push
+          else
+            echo "state.json 변경 없음"
+          fi
