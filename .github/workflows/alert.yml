@@ -15,6 +15,8 @@ on:
     # private 로 되돌린다면 월 2,000분 한도(작업당 1분 올림) 때문에 30분 주기가 상한이다.
     - cron: "*/10 * * * *"
   workflow_dispatch:        # Actions 탭에서 수동 실행
+  repository_dispatch:      # 외부에서 API 로 깨우기 (GitHub 스케줄러를 못 믿을 때)
+    types: [tick]
 
 concurrency:
   # 앞선 실행이 밀려서 겹치면 state.json 을 동시에 건드리게 된다. 한 번에 하나만.
