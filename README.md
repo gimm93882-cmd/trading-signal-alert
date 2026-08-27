@@ -239,10 +239,56 @@ MAX_BACKLOG_BARS = 24                          # 이보다 오래 멈췄으면 �
 
 ## 운영 시 알아둘 것
 
-- **GitHub 의 예약 실행은 보장되지 않습니다.** 지연되는 정도가 아니라 아예 건너뜁니다.
-  실측으로 9시간 연속 실행되지 않아 그 사이 BUY 3건을 놓친 적이 있습니다.
-  그래서 크론을 **10분 주기**로 걸어 그중 하나는 걸리도록 했습니다.
-  새 확정봉이 없으면 즉시 종료하므로 중복 알림은 나지 않습니다.
+### GitHub 예약 실행은 믿을 수 없습니다 — 맥에서 대신 깨웁니다
+
+GitHub Actions 의 `schedule` 은 무료 티어에서 **집행이 보장되지 않습니다.**
+지연되는 정도가 아니라 아예 건너뜁니다. 실측 기록:
+
+- 10시간 연속 미실행. 그 사이 BUY 3건(BTC·ETH·SOL)을 전부 놓쳤습니다.
+- 크론을 10분 주기로 바꾸고 저장소를 public 으로 전환한 뒤에도
+  45분간 예약 실행이 한 건도 들어오지 않았습니다.
+- 워크플로 active, Actions 활성, 기본 브랜치 확인 — **설정 문제가 아닙니다.**
+
+그래서 **맥의 launchd 가 10분마다 GitHub 을 깨우는** 구조를 추가했습니다.
+
+```
+맥 (launchd, 10분마다)
+   └─ gh api POST /dispatches  →  GitHub Actions 실행
+                                    └─ 신호 계산 · 발송 · state.json 커밋
+```
+
+맥은 "실행해라"고 API 를 찌르기만 합니다. **실제 계산·발송·상태 저장은 전부
+GitHub 안에서** 일어나므로, 맥에서 봇을 따로 돌릴 때 생기는 상태 충돌이나
+중복 알림이 없습니다. 맥이 꺼져 있으면 GitHub 자체 크론이 백업으로 남습니다.
+
+관련 파일:
+
+| 위치 | 역할 |
+|---|---|
+| `~/.local/bin/trading-signal-trigger.sh` | dispatch 를 쏘는 스크립트 |
+| `~/Library/LaunchAgents/com.kinampark.trading-signal-trigger.plist` | 10분 주기 등록 |
+| `~/Library/Logs/trading-signal-trigger.log` | 발사 기록 |
+
+상태 확인 · 중지:
+
+```bash
+launchctl list | grep trading-signal          # 등록 확인
+tail -20 ~/Library/Logs/trading-signal-trigger.log
+launchctl bootout gui/$(id -u)/com.kinampark.trading-signal-trigger   # 중지
+```
+
+**맥을 꺼둬도 반드시 받아야 한다면** 외부 크론 서비스(cron-job.org 등)에서
+아래를 10분마다 호출하도록 걸면 됩니다. 워크플로에 `repository_dispatch` 를
+열어두었습니다.
+
+```
+POST https://api.github.com/repos/<계정>/<저장소>/dispatches
+Authorization: Bearer <GitHub PAT, repo 권한>
+Accept: application/vnd.github+json
+Body: {"event_type":"tick"}
+```
+
+- 봇은 새 확정봉이 없으면 즉시 종료하므로 자주 깨워도 중복 알림이 나지 않습니다.
 - **저장소를 private 으로 되돌리면 크론 주기를 낮춰야 합니다.** GitHub Free 의
   private 저장소는 월 2,000분이고 작업 시간을 분 단위로 올림합니다.
   10분 주기면 월 4,320분으로 한도를 넘습니다. private 에서의 상한은 30분 주기입니다.
