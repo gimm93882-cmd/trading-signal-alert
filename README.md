@@ -74,7 +74,6 @@ python3 -m bot.main
 ### 2. 로컬에서 먼저 확인
 
 ```bash
-cd "/Users/kinampark/Desktop/LCI 트레이딩"
 python3 -m unittest discover -s tests
 ```
 
