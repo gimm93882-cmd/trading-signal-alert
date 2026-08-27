@@ -9,8 +9,6 @@
 # 현물을 보려면 PRODUCT_TYPE 을 None 으로 두고 SPOT_GRANULARITY 를 쓴다(bitget.py 참조).
 SYMBOLS = [
     "BTCUSDT",
-    "ETHUSDT",
-    "SOLUSDT",
 ]
 
 PRODUCT_TYPE = "usdt-futures"
