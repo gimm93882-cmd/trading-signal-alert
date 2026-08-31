@@ -1,0 +1,603 @@
+<script>
+/* 이 파일을 단독으로 호스팅할 때를 위한 뷰포트 설정.
+   없으면 모바일이 980px 로 렌더링한 뒤 축소해서 글씨가 잘게 보인다.
+   아티팩트처럼 이미 뷰포트가 지정된 환경에서는 아무 것도 하지 않는다. */
+if(!document.querySelector('meta[name="viewport"]')){
+  var vp=document.createElement("meta");
+  vp.name="viewport"; vp.content="width=device-width, initial-scale=1, viewport-fit=cover";
+  document.head.appendChild(vp);
+}
+</script>
+<title>복리 계산기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+
+<style>
+:root{
+  /* 밝은 배경 고정. 다크 모드 사용자에게도 같은 밝은 화면을 보여준다. */
+  --ground:#F6F7F9; --surface:#FFFFFF; --surface-2:#F0F2F5; --surface-3:#FAFBFC;
+  --ink:#101419; --ink-2:#3D4550; --muted:#7B8492;
+  --line:#E4E8ED; --line-2:#D3D9E0;
+  --accent:#FF6B00; --accent-ink:#C24700; --accent-soft:#FFF1E6;
+  --gain:#E5384E; --loss:#1F6FEB;
+  --shadow:0 1px 2px rgba(16,20,25,.04), 0 10px 28px -14px rgba(16,20,25,.18);
+  --shadow-lg:0 2px 4px rgba(16,20,25,.05), 0 18px 44px -18px rgba(16,20,25,.24);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"Noto Sans KR",system-ui,-apple-system,"Apple SD Gothic Neo",sans-serif;
+  font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  -webkit-text-size-adjust:100%;
+}
+.num{font-family:"JetBrains Mono","Noto Sans KR",monospace;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.display{font-family:"Black Han Sans","Noto Sans KR",sans-serif;font-weight:400}
+
+.wrap{max-width:1160px;margin:0 auto;padding:36px 20px 80px}
+@media (max-width:600px){.wrap{padding:22px 14px 56px}}
+
+header{margin-bottom:26px}
+.eyebrow{
+  display:inline-block;font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:#fff;background:var(--accent);font-weight:700;margin:0 0 12px;
+  padding:4px 10px;border-radius:4px
+}
+h1{
+  font-family:"Black Han Sans","Noto Sans KR",sans-serif;font-weight:400;
+  font-size:clamp(32px,7vw,52px);line-height:1.1;margin:0;
+  letter-spacing:-.01em;text-wrap:balance
+}
+h1 em{font-style:normal;color:var(--accent)}
+header p{margin:12px 0 0;color:var(--muted);max-width:60ch;font-size:14.5px;line-height:1.7}
+
+.grid{display:grid;grid-template-columns:352px 1fr;gap:22px;align-items:start}
+/* 그리드/플렉스 아이템의 기본 min-width:auto 는 내용의 최소 너비만큼 트랙을 넓혀
+   좁은 화면에서 페이지 전체를 가로로 밀어낸다. 명시적으로 풀어준다. */
+.grid>*,.stack>*,.panel,.panel-body,.field,.control,.stats,.stat{min-width:0}
+input,select{min-width:0}
+@media (max-width:900px){.grid{grid-template-columns:1fr;gap:16px}}
+
+.panel{
+  background:var(--surface);border:1px solid var(--line);
+  border-radius:14px;box-shadow:var(--shadow);overflow:hidden
+}
+.panel-head{
+  padding:14px 18px;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px
+}
+.panel-head h2{
+  font-size:15px;font-weight:700;margin:0;letter-spacing:-.01em
+}
+.panel-head .hint{font-size:12px;color:var(--muted)}
+.panel-body{padding:18px}
+
+.side{position:sticky;top:18px}
+@media (max-width:900px){.side{position:static}}
+
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.field:last-child{margin-bottom:0}
+label{font-size:12.5px;font-weight:600;color:var(--ink-2);letter-spacing:.01em}
+label .sub{font-weight:400;color:var(--muted);font-size:11.5px}
+.control{position:relative;display:flex;align-items:center}
+input[type=number],input[type=text],select{
+  width:100%;min-height:46px;padding:11px 13px;background:var(--surface-3);color:var(--ink);
+  border:1.5px solid var(--line-2);border-radius:9px;font:inherit;font-size:16px;
+  font-family:"JetBrains Mono","Noto Sans KR",monospace;font-variant-numeric:tabular-nums;
+  font-weight:500;appearance:none;-webkit-appearance:none;
+}
+select{font-family:"Noto Sans KR",sans-serif;background-image:none}
+input[type=number]{-moz-appearance:textfield}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input:hover,select:hover{border-color:var(--muted)}
+input:focus,select:focus,button:focus-visible{
+  outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)
+}
+.suffix{
+  position:absolute;right:13px;font-size:13px;color:var(--muted);pointer-events:none;font-weight:500
+}
+input.has-suffix{padding-right:42px}
+.row{display:grid;grid-template-columns:1fr 104px;gap:9px}
+.readout{font-size:11.5px;color:var(--muted);min-height:1.2em}
+
+.seg{display:flex;border:1.5px solid var(--line-2);border-radius:9px;overflow:hidden;background:var(--surface-3)}
+.seg button{
+  flex:1;min-height:44px;padding:9px 4px;background:transparent;color:var(--ink-2);
+  border:0;border-right:1.5px solid var(--line-2);font:inherit;font-size:14px;
+  font-weight:500;cursor:pointer;transition:background .12s
+}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:var(--surface-2)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:#fff;font-weight:700}
+
+.go{
+  width:100%;margin-top:18px;min-height:50px;padding:13px;background:var(--accent);color:#fff;
+  border:0;border-radius:10px;font:inherit;font-size:16px;font-weight:700;cursor:pointer;
+  letter-spacing:.01em;transition:filter .12s,transform .06s
+}
+.go:hover{filter:brightness(1.07)}
+.go:active{transform:translateY(1px)}
+
+/* 최종 자산 하나를 크게 띄우고 나머지는 아래에 둔다. */
+.hero{padding:26px 22px 22px;background:var(--surface);text-align:center}
+.hero .k{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:8px}
+.hero .v{
+  font-family:"Black Han Sans","Noto Sans KR",sans-serif;font-weight:400;
+  font-size:clamp(32px,7.2vw,56px);line-height:1.05;letter-spacing:-.015em;
+  word-break:keep-all
+}
+.hero .exact{
+  font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:clamp(13px,2.6vw,15px);color:var(--muted);margin-top:8px;font-weight:500
+}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border-top:1px solid var(--line)}
+@media (max-width:520px){.stats{grid-template-columns:1fr 1fr}.stats .stat:last-child{grid-column:1/-1}}
+.stat{background:var(--surface);padding:14px 16px;min-width:0}
+.stat .k{font-size:11.5px;color:var(--muted);margin-bottom:5px;white-space:nowrap}
+.stat .v{
+  font-size:clamp(15px,3.2vw,19px);font-weight:700;letter-spacing:-.025em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.stat .sub{font-size:11px;color:var(--muted);margin-top:3px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.up{color:var(--gain)} .down{color:var(--loss)}
+
+.tablewrap{overflow-x:auto;max-height:440px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;font-size:13px;min-width:520px}
+th,td{padding:9px 14px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{text-align:left;font-weight:600}
+thead th{
+  position:sticky;top:0;background:var(--surface-2);z-index:1;
+  font-size:11px;letter-spacing:.03em;color:var(--muted);font-weight:700
+}
+tbody tr:hover{background:var(--surface-3)}
+td.n{font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;font-size:12.5px}
+
+.note{
+  margin-top:14px;padding:14px 16px;background:var(--accent-soft);
+  border-radius:10px;font-size:13px;line-height:1.7;color:var(--ink-2);
+  border:1px solid #FFE0C7
+}
+.note b{color:var(--ink);font-weight:700}
+
+details.more{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
+details.more summary{
+  cursor:pointer;font-size:14px;font-weight:700;color:var(--accent-ink);
+  list-style:none;padding:6px 0;min-height:32px
+}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::before{content:"▸ ";font-size:11px}
+details.more[open] summary::before{content:"▾ "}
+.more-body{padding-top:14px}
+
+.stack{display:flex;flex-direction:column;gap:18px}
+
+.kv{display:flex;justify-content:space-between;gap:14px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;flex-wrap:wrap}
+.kv:last-child{border-bottom:0}
+.kv .k{color:var(--muted)}
+.kv .v{font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;font-weight:700}
+
+.verdict{font-size:14.5px;line-height:1.7;margin:0}
+.verdict strong{
+  font-family:"Black Han Sans","Noto Sans KR",sans-serif;font-weight:400;
+  font-size:clamp(20px,5vw,28px);color:var(--accent-ink);display:block;margin-top:4px
+}
+
+footer{margin-top:32px;padding-top:18px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}
+
+@media (max-width:600px){
+  body{font-size:14.5px}
+  .panel-body{padding:16px}
+  .panel-head{padding:13px 16px}
+  .hero{padding:22px 16px 18px}
+  .stat{padding:12px 14px}
+  footer{font-size:11.5px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">복리 시뮬레이터</p>
+  <h1>복리 <em>계산기</em></h1>
+  <p>회차당 수익률로 자산이 어떻게 불어나는지 계산합니다. 레버리지와 수수료를 수익률로 환산하고, 목표 금액까지 몇 회차가 걸리는지 역산하며, 승률을 넣으면 실제 기대값으로 다시 계산합니다.</p>
+</header>
+
+<div class="grid">
+  <!-- 입력 -->
+  <div class="side">
+  <div class="panel">
+    <div class="panel-head"><h2>투자 설정</h2></div>
+    <div class="panel-body">
+
+      <div class="field">
+        <label for="seed">초기 원금</label>
+        <div class="control">
+          <input class="has-suffix" type="number" id="seed" value="500000" min="0" step="10000">
+          <span class="suffix">원</span>
+        </div>
+        <div class="readout" id="seedRead"></div>
+      </div>
+
+      <div class="field">
+        <label for="add">회차당 추가 납입 <span class="sub">적립식</span></label>
+        <div class="control">
+          <input class="has-suffix" type="number" id="add" value="0" min="0" step="10000">
+          <span class="suffix">원</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>계산 기간</label>
+        <div class="row">
+          <input type="number" id="periods" value="100" min="1" max="100000" step="1">
+          <select id="unit">
+            <option value="일">일</option>
+            <option value="회" selected>회</option>
+            <option value="주">주</option>
+            <option value="개월">개월</option>
+            <option value="년">년</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="rate">회차당 수익률</label>
+        <div class="control">
+          <input class="has-suffix" type="number" id="rate" value="1" step="0.01">
+          <span class="suffix">%</span>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>세금</label>
+        <div class="seg" id="taxSeg">
+          <button type="button" data-tax="0" aria-pressed="true">비과세</button>
+          <button type="button" data-tax="15.4" aria-pressed="false">15.4%</button>
+          <button type="button" data-tax="22" aria-pressed="false">22%</button>
+        </div>
+      </div>
+
+      <button class="go" id="calc">계산하기</button>
+    </div>
+  </div>
+
+  <!-- 레버리지 환산 -->
+  <div class="panel" style="margin-top:16px">
+    <div class="panel-head"><h2>레버리지 환산</h2><span class="hint">→ 수익률에 반영</span></div>
+    <div class="panel-body">
+      <div class="field">
+        <label for="move">가격 변동률 <span class="sub">1회 매매</span></label>
+        <div class="control">
+          <input class="has-suffix" type="number" id="move" value="0.6" step="0.01">
+          <span class="suffix">%</span>
+        </div>
+      </div>
+      <div class="row" style="grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field" style="margin:0">
+          <label for="lev">레버리지</label>
+          <div class="control">
+            <input class="has-suffix" type="number" id="lev" value="20" min="1" step="1">
+            <span class="suffix">배</span>
+          </div>
+        </div>
+        <div class="field" style="margin:0">
+          <label for="fee">수수료 <span class="sub">편도</span></label>
+          <div class="control">
+            <input class="has-suffix" type="number" id="fee" value="0.06" step="0.01">
+            <span class="suffix">%</span>
+          </div>
+        </div>
+      </div>
+      <div class="note" id="levNote" style="margin-top:14px"></div>
+      <button class="go" id="applyLev" style="margin-top:12px">이 값을 수익률로 넣기</button>
+    </div>
+  </div>
+  </div>
+
+  <!-- 결과 -->
+  <div class="stack">
+    <div class="panel">
+      <div class="panel-head"><h2 id="resTitle">결과</h2><span class="hint" id="resHint"></span></div>
+      <div class="hero" id="hero"></div>
+      <div class="stats" id="stats"></div>
+      <div class="panel-body" style="padding-top:14px">
+        <div class="note" id="targetNote"></div>
+
+        <details class="more">
+          <summary>목표 금액까지 역산</summary>
+          <div class="more-body">
+            <div class="field">
+              <label for="goal">목표 금액</label>
+              <div class="control">
+                <input class="has-suffix" type="number" id="goal" value="1000000000" min="1" step="10000000">
+                <span class="suffix">원</span>
+              </div>
+              <div class="readout" id="goalRead"></div>
+            </div>
+            <div id="goalOut"></div>
+          </div>
+        </details>
+
+        <details class="more">
+          <summary>승률을 반영한 현실 계산</summary>
+          <div class="more-body">
+            <p style="margin:0 0 14px;font-size:13px;color:var(--muted);line-height:1.65">
+              위 계산은 <b>매 회차 이긴다</b>고 가정합니다. 실제로는 지는 회차가 섞이므로, 승률과 손실 폭을 넣으면 기하평균 기준 기대값으로 다시 계산합니다.
+            </p>
+            <div class="row" style="grid-template-columns:1fr 1fr;gap:10px">
+              <div class="field" style="margin:0">
+                <label for="wr">승률</label>
+                <div class="control">
+                  <input class="has-suffix" type="number" id="wr" value="50" min="0" max="100" step="1">
+                  <span class="suffix">%</span>
+                </div>
+              </div>
+              <div class="field" style="margin:0">
+                <label for="lossPct">질 때 손실 <span class="sub">증거금 대비</span></label>
+                <div class="control">
+                  <input class="has-suffix" type="number" id="lossPct" value="12" min="0" max="100" step="0.5">
+                  <span class="suffix">%</span>
+                </div>
+              </div>
+            </div>
+            <div id="realOut" style="margin-top:16px"></div>
+          </div>
+        </details>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h2>회차별 상세</h2><span class="hint" id="tblHint"></span></div>
+      <div class="tablewrap"><table>
+        <thead><tr>
+          <th>회차</th><th>해당 회차 수익</th><th>누적 순수익</th><th>총 자산</th><th>수익률</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  계산 결과는 입력값에 대한 산술 결과일 뿐이며 특정 투자의 수익을 예상하거나 보장하지 않습니다. 실제 매매에는 슬리피지·펀딩비·청산이 발생하고, 이 계산기는 그것을 반영하지 않습니다.
+</footer>
+</div>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var KEY = "compound-calc-v1";
+
+  function won(n){
+    if(!isFinite(n)) return "—";
+    return Math.round(n).toLocaleString("ko-KR") + "원";
+  }
+  // 1,234,567,890 -> "12억 3,456만"
+  function kor(n){
+    n = Math.floor(Math.abs(n));
+    if(n < 10000) return n.toLocaleString("ko-KR") + "원";
+    var eok = Math.floor(n / 100000000);
+    var man = Math.floor((n % 100000000) / 10000);
+    var out = [];
+    if(eok) out.push(eok.toLocaleString("ko-KR") + "억");
+    if(man) out.push(man.toLocaleString("ko-KR") + "만");
+    return out.join(" ") + "원";
+  }
+  function pct(x, d){ 
+    d = d === undefined ? 2 : d;
+    return (x>=0?"+":"") + x.toFixed(d) + "%"; 
+  }
+
+  function tax(){
+    var b = document.querySelector('#taxSeg button[aria-pressed="true"]');
+    return b ? parseFloat(b.dataset.tax)/100 : 0;
+  }
+
+  function inputs(){
+    return {
+      seed: +$("seed").value || 0,
+      add: +$("add").value || 0,
+      n: Math.max(1, Math.min(100000, Math.floor(+$("periods").value || 1))),
+      unit: $("unit").value,
+      r: (+$("rate").value || 0)/100,
+      t: tax()
+    };
+  }
+
+  // 회차별 진행. 수익에만 과세하고, 추가 납입은 회차 끝에 더한다.
+  function run(cfg, cap){
+    var bal = cfg.seed, principal = cfg.seed, rows = [], netSum = 0;
+    var lim = Math.min(cfg.n, cap || cfg.n);
+    for(var i=1;i<=lim;i++){
+      var gross = bal * cfg.r;
+      var net = gross * (1 - cfg.t);
+      bal += net; netSum += net;
+      if(cfg.add){ bal += cfg.add; principal += cfg.add; }
+      rows.push({i:i, gross:gross, net:net, cum:netSum, bal:bal, principal:principal});
+    }
+    return {rows:rows, bal:bal, principal:principal, net:netSum};
+  }
+
+  function render(){
+    var c = inputs();
+    var cap = 2000;                       // 표는 최대 2,000행까지만 그린다
+    var res = run(c, cap);
+    var full = c.n > cap ? run(c) : res;
+
+    var roi = full.principal>0 ? (full.bal - full.principal)/full.principal*100 : 0;
+    var mult = full.principal>0 ? full.bal/c.seed : 0;
+
+    $("resTitle").textContent = "결과";
+    $("resHint").textContent = c.n.toLocaleString("ko-KR") + c.unit + " · 회차당 " + pct(c.r*100) 
+      + (c.t ? " · 세금 " + (c.t*100).toFixed(1) + "%" : " · 비과세");
+
+    var gainCls = full.bal>=full.principal ? "up" : "down";
+    $("hero").innerHTML =
+      "<div class='k'>최종 자산</div>"
+      + "<div class='v display " + gainCls + "'>" + kor(full.bal) + "</div>"
+      + "<div class='exact'>" + won(full.bal) + "</div>";
+
+    $("stats").innerHTML =
+      tile("총 투자 원금", won(full.principal), c.add ? c.n.toLocaleString("ko-KR")+"회 납입 포함" : "추가 납입 없음", "") +
+      tile("누적 순수익", won(full.bal-full.principal), "세후 기준", gainCls) +
+      tile("수익률", pct(roi,2), mult>=1 ? "원금의 " + mult.toLocaleString("ko-KR",{maximumFractionDigits:1}) + "배" : "", gainCls);
+
+    var tb = res.rows.map(function(x){
+      return "<tr><td>"+x.i.toLocaleString("ko-KR")+c.unit+"</td>"+
+        "<td class='n "+(x.net>=0?"up":"down")+"'>"+won(x.gross)+"</td>"+
+        "<td class='n'>"+won(x.cum)+"</td>"+
+        "<td class='n'>"+won(x.bal)+"</td>"+
+        "<td class='n'>"+pct((x.bal-x.principal)/x.principal*100)+"</td></tr>";
+    }).join("");
+    $("tbody").innerHTML = tb;
+    $("tblHint").textContent = c.n>cap ? "앞 "+cap.toLocaleString("ko-KR")+"회차만 표시" : c.n.toLocaleString("ko-KR")+"회차";
+
+    $("targetNote").innerHTML = "<b>" + kor(c.seed) + "</b> 이 " + c.n.toLocaleString("ko-KR") + c.unit
+      + " 뒤 <b>" + kor(full.bal) + "</b> 이 됩니다. 매 회차 " + pct(c.r*100) + " 를 "
+      + "<b>한 번도 빠짐없이</b> 달성한다는 가정입니다.";
+
+    goal(c);
+    real(c);
+    save();
+  }
+
+  function tile(k,v,sub,cls){
+    return "<div class='stat'><div class='k'>"+k+"</div>"+
+      "<div class='v num "+(cls||"")+"'>"+v+"</div>"+
+      (sub?"<div class='sub'>"+sub+"</div>":"")+"</div>";
+  }
+
+  // 목표 금액까지 몇 회차인가
+  function goal(c){
+    var g = +$("goal").value || 0;
+    $("goalRead").textContent = g ? kor(g) : "";
+    if(!g || g<=0){ $("goalOut").innerHTML=""; return; }
+
+    var eff = c.r * (1 - c.t);
+    var out = "";
+
+    if(c.seed >= g){
+      out = "<p class='verdict'>이미 목표 금액 이상입니다.</p>";
+    } else if(eff<=0 && !c.add){
+      out = "<p class='verdict'>회차당 수익률이 0 이하라 목표에 도달하지 않습니다.</p>";
+    } else {
+      var bal=c.seed, k=0, LIM=2000000;
+      while(bal<g && k<LIM){ bal += bal*eff; if(c.add) bal+=c.add; k++; }
+      if(k>=LIM){
+        out = "<p class='verdict'>200만 회차 안에 도달하지 않습니다.</p>";
+      } else {
+        var perDay = {"일":1,"회":1,"주":7,"개월":30.44,"년":365.25}[c.unit];
+        var days = k*perDay, yrs = days/365.25;
+        out = "<p class='verdict'>목표까지 <strong>"+k.toLocaleString("ko-KR")+c.unit+"</strong></p>"
+          + "<div style='margin-top:12px'>"
+          + kv("환산", yrs>=1 ? yrs.toLocaleString("ko-KR",{maximumFractionDigits:1})+"년" : Math.round(days).toLocaleString("ko-KR")+"일")
+          + kv("필요 배수", (g/c.seed).toLocaleString("ko-KR",{maximumFractionDigits:1})+"배")
+          + kv("도달 시 자산", won(bal))
+          + "</div>";
+      }
+    }
+    // 역으로, 지금 기간 안에 목표를 맞추려면 회차당 몇 %가 필요한가
+    if(c.seed>0 && g>c.seed && !c.add){
+      var need = (Math.pow(g/c.seed, 1/c.n) - 1) / (1-c.t) * 100;
+      out += "<div style='margin-top:14px'>" 
+        + kv(c.n.toLocaleString("ko-KR")+c.unit+" 안에 맞추려면", "회차당 " + need.toLocaleString("ko-KR",{maximumFractionDigits: need<10?2:0}) + "%")
+        + "</div>";
+    }
+    $("goalOut").innerHTML = out;
+  }
+
+  function kv(k,v){ return "<div class='kv'><span class='k'>"+k+"</span><span class='v'>"+v+"</span></div>"; }
+
+  // 승률 반영: 기하평균 성장률로 다시 계산
+  function real(c){
+    var p = Math.max(0,Math.min(100,+$("wr").value||0))/100;
+    var l = Math.max(0,Math.min(100,+$("lossPct").value||0))/100;
+    var g = c.r * (1-c.t);
+
+    if(1-l <= 0 && p < 1){
+      $("realOut").innerHTML = "<p class='verdict'>질 때 손실이 100%면 한 번만 져도 계좌가 0이 됩니다. 승률이 100%가 아닌 한 결국 도달합니다.</p>";
+      return;
+    }
+    // 기하평균: exp(p·ln(1+g) + (1-p)·ln(1-l))
+    var lg = p*Math.log(1+g) + (1-p)*Math.log(1-l);
+    var geo = Math.exp(lg) - 1;
+    var bal = c.seed * Math.exp(lg*c.n) + (c.add ? 0 : 0);
+    var naive = c.seed * Math.pow(1+g, c.n);
+
+    $("realOut").innerHTML =
+      "<div>"
+      + kv("이길 때", pct(g*100) + " · " + (p*100).toFixed(0) + "% 확률")
+      + kv("질 때", pct(-l*100) + " · " + ((1-p)*100).toFixed(0) + "% 확률")
+      + kv("실질 회차당 (기하평균)", "<span class='"+(geo>=0?"up":"down")+"'>"+pct(geo*100,3)+"</span>")
+      + "</div>"
+      + "<div class='note' style='margin-top:14px'>"
+      + "매 회차 이긴다고 보면 <b>"+kor(naive)+"</b> 이지만, 승률 "+(p*100).toFixed(0)+"% 를 반영하면 "
+      + c.n.toLocaleString("ko-KR")+c.unit+" 뒤 <b class='"+(bal>=c.seed?"up":"down")+"'>"+kor(bal)+"</b> 입니다."
+      + (geo<0 ? " 실질 성장률이 마이너스라 회차가 늘수록 줄어듭니다." : "")
+      + "</div>";
+  }
+
+  // 레버리지 → 회차당 수익률
+  function lev(){
+    var m = +$("move").value||0, L = +$("lev").value||1, f = +$("fee").value||0;
+    var gross = m*L, cost = f*2*L, net = gross-cost;
+    var liq = -(100/L - 0.4);
+    $("levNote").innerHTML =
+      "가격 " + pct(m) + " × " + L + "배 = <b>" + pct(gross) + "</b><br>"
+      + "수수료 " + f + "% 왕복 × " + L + "배 = <b class='down'>" + pct(-cost) + "</b><br>"
+      + "→ 회차당 순수익 <b class='" + (net>=0?"up":"down") + "'>" + pct(net) + "</b>"
+      + "<br><span style='color:var(--muted)'>참고 · " + L + "배 청산선은 가격 " + liq.toFixed(2) + "%</span>";
+    return net;
+  }
+
+  function save(){
+    try{
+      var o={};
+      ["seed","add","periods","unit","rate","move","lev","fee","goal","wr","lossPct"].forEach(function(k){ o[k]=$(k).value; });
+      o.tax = tax()*100;
+      localStorage.setItem(KEY, JSON.stringify(o));
+    }catch(e){}
+  }
+  function load(){
+    try{
+      var o = JSON.parse(localStorage.getItem(KEY)||"null");
+      if(!o) return;
+      ["seed","add","periods","unit","rate","move","lev","fee","goal","wr","lossPct"].forEach(function(k){
+        if(o[k]!==undefined && $(k)) $(k).value=o[k];
+      });
+      if(o.tax!==undefined){
+        [].forEach.call(document.querySelectorAll("#taxSeg button"), function(b){
+          b.setAttribute("aria-pressed", String(parseFloat(b.dataset.tax)===o.tax));
+        });
+      }
+    }catch(e){}
+  }
+
+  // 이벤트
+  $("calc").addEventListener("click", render);
+  $("applyLev").addEventListener("click", function(){
+    $("rate").value = lev().toFixed(3); render();
+  });
+  document.querySelectorAll("#taxSeg button").forEach(function(b){
+    b.addEventListener("click", function(){
+      document.querySelectorAll("#taxSeg button").forEach(function(x){ x.setAttribute("aria-pressed","false"); });
+      b.setAttribute("aria-pressed","true"); render();
+    });
+  });
+  ["seed","add","periods","unit","rate"].forEach(function(k){
+    $(k).addEventListener("input", render);
+  });
+  ["move","lev","fee"].forEach(function(k){ $(k).addEventListener("input", lev); });
+  ["goal"].forEach(function(k){ $(k).addEventListener("input", function(){ goal(inputs()); save(); }); });
+  ["wr","lossPct"].forEach(function(k){ $(k).addEventListener("input", function(){ real(inputs()); save(); }); });
+  $("seed").addEventListener("input", function(){ $("seedRead").textContent = kor(+$("seed").value||0); });
+
+  load();
+  $("seedRead").textContent = kor(+$("seed").value||0);
+  lev();
+  render();
+})();
+</script>
