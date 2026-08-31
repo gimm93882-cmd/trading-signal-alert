@@ -1,6 +1,7 @@
 """타임프레임 분리 검증.
 
-1시간봉과 15분봉을 함께 돌리면서 어긋나기 쉬운 것들을 고정한다.
+타임프레임을 여러 개 돌릴 때 어긋나기 쉬운 것들을 고정한다.
+지금은 1시간봉만 쓰지만, 나중에 15분봉을 다시 넣어도 이 계약이 유지돼야 한다.
 
   1. 상태가 타임프레임별로 따로 관리되는가 (섞이면 한쪽이 과거 신호를 몰아 보낸다)
   2. 예전 상태 키가 1시간봉으로 이관되는가 (안 되면 기존 사용자가 과거 신호를 다시 받는다)
@@ -40,10 +41,17 @@ class TestStateMigration(unittest.TestCase):
 
 
 class TestTimeframeConfig(unittest.TestCase):
-    def test_two_timeframes(self):
-        names = [t[0] for t in config.TIMEFRAMES]
-        self.assertIn("1H", names)
-        self.assertIn("15m", names)
+    def test_at_least_one_timeframe(self):
+        """어떤 조합을 쓰든 형식은 지켜져야 한다.
+
+        지금은 1시간봉만 쓰지만 15m 를 다시 넣어도 코드가 그대로 동작해야 하므로,
+        특정 타임프레임을 강제하지 않고 구조만 검사한다.
+        """
+        self.assertTrue(config.TIMEFRAMES)
+        for t in config.TIMEFRAMES:
+            self.assertEqual(len(t), 3, "(granularity, 봉 길이 초, 표시 이름) 형식")
+            self.assertIsInstance(t[1], int)
+            self.assertTrue(t[2])
 
     def test_bar_seconds_match_granularity(self):
         for g, secs, _ in config.TIMEFRAMES:
