@@ -93,10 +93,15 @@ def _run_symbol(symbol, state, senders, dry_run):
     else:
         print("[%s] 새 확정봉 없음 (마지막 %s)" % (symbol, _kst(last_bar)))
 
-    _resolve_provisional(symbol, entry, signals, newest, senders, dry_run)
+    # 형성 중인 봉의 상태를 먼저 구한다. 취소 판정이 이 값을 봐야 하기 때문이다.
+    live = []
+    if forming is not None and config.PROVISIONAL_ALERTS:
+        live = [s for s in detect(candles + [forming]) if s.bar_time == forming.time]
+
+    _resolve_provisional(symbol, entry, signals, newest, forming, live, senders, dry_run)
 
     if forming is not None:
-        _emit_provisional(symbol, entry, candles, forming, now, senders, dry_run)
+        _emit_provisional(symbol, entry, forming, live, now, senders, dry_run)
 
 
 def _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run):
@@ -123,18 +128,27 @@ def _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run):
             sender.send_signal(symbol, s)
 
 
-def _resolve_provisional(symbol, entry, signals, newest, senders, dry_run):
+def _resolve_provisional(symbol, entry, signals, newest, forming, live, senders, dry_run):
     """잠정으로 알렸던 봉이 닫혔으면, 확정됐는지 확인하고 아니면 취소를 알린다.
 
     잠정 신호는 봉 중간의 값으로 판정한 것이라 봉이 닫히면서 조건이 무효가 될 수 있다.
     알리고 끝내면 사용자는 없어진 신호를 붙잡고 있게 되므로 반드시 뒷정리를 보낸다.
+
+    다만 **다음 봉에서 같은 신호가 그대로 보이고 있다면 사라진 게 아니다.**
+    그 경우 취소를 보내면 몇 초 뒤에 오는 잠정 알림과 정면으로 모순된다.
+    (실제 사례: 08:00 봉에서 되돌림으로 무효가 됐지만 09:00 봉은 시작부터 SELL 이었다.)
+    이럴 땐 취소 대신 잠정 상태를 새 봉으로 넘겨, 알림 없이 조용히 이어간다.
     """
     prov = entry.get("provisional")
     if not prov or prov["bar"] > newest:
         return                                  # 아직 그 봉이 닫히지 않았다
 
     held = {s.kind for s in signals if s.bar_time == prov["bar"]}
-    dropped = [k for k in prov["kinds"] if k not in held]
+    live_kinds = {s.kind for s in live}
+    gone = [k for k in prov["kinds"] if k not in held]
+
+    carried = [k for k in gone if k in live_kinds]
+    dropped = [k for k in gone if k not in live_kinds]
 
     if dropped:
         print("[%s] 잠정 취소 %s (%s 봉)"
@@ -143,27 +157,26 @@ def _resolve_provisional(symbol, entry, signals, newest, senders, dry_run):
             for sender in senders:
                 sender.send_cancelled(symbol, prov["bar"], dropped)
 
-    entry.pop("provisional", None)
+    if carried and forming is not None:
+        print("[%s] 잠정 %s 유지 — 다음 봉으로 이어감" % (symbol, "/".join(carried)))
+        entry["provisional"] = {"bar": forming.time, "kinds": sorted(carried)}
+    else:
+        entry.pop("provisional", None)
 
 
-def _emit_provisional(symbol, entry, candles, forming, now, senders, dry_run):
+def _emit_provisional(symbol, entry, forming, live, now, senders, dry_run):
     """형성 중인 봉에서 조건이 성립하면 봉 마감을 기다리지 않고 바로 알린다.
 
     확정만 기다리면 최대 1시간 늦는다. 차트를 계속 볼 수 없어서 알림을 쓰는데
     차트보다 느리면 알림의 목적이 사라진다. 대신 확정이 아님을 명시해서 보낸다.
     같은 봉·같은 종류는 한 번만 보낸다(10분마다 재전송 방지).
     """
-    if not config.PROVISIONAL_ALERTS:
-        return
-
-    live = detect(candles + [forming])
-    fresh = [s for s in live if s.bar_time == forming.time]
-    if not fresh:
+    if not config.PROVISIONAL_ALERTS or not live:
         return
 
     prov = entry.get("provisional")
     sent = set(prov["kinds"]) if prov and prov["bar"] == forming.time else set()
-    new = [s for s in fresh if s.kind not in sent]
+    new = [s for s in live if s.kind not in sent]
 
     for s in new:
         left = max(0, (forming.time + config.BAR_SECONDS * 1000 - now) // 60000)

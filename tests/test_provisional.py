@@ -63,9 +63,13 @@ class TestProvisionalEmit(unittest.TestCase):
         self.forming = bars(RISING + [CRASH])[-1]
         self.sender = FakeSender()
 
+    def live(self):
+        return [s for s in m.detect(self.confirmed + [self.forming])
+                if s.bar_time == self.forming.time]
+
     def test_fires_on_forming_bar(self):
         entry = {"last_bar": self.confirmed[-1].time}
-        m._emit_provisional("BTCUSDT", entry, self.confirmed, self.forming,
+        m._emit_provisional("BTCUSDT", entry, self.forming, self.live(),
                             self.forming.time + 10 * 60000, [self.sender], False)
 
         kinds = [k for _, k, _ in self.sender.provisional]
@@ -75,7 +79,7 @@ class TestProvisionalEmit(unittest.TestCase):
     def test_does_not_resend_same_bar(self):
         entry = {"last_bar": self.confirmed[-1].time}
         for _ in range(3):
-            m._emit_provisional("BTCUSDT", entry, self.confirmed, self.forming,
+            m._emit_provisional("BTCUSDT", entry, self.forming, self.live(),
                                 self.forming.time + 10 * 60000, [self.sender], False)
 
         sells = [k for _, k, _ in self.sender.provisional if k == SELL]
@@ -87,7 +91,7 @@ class TestProvisionalEmit(unittest.TestCase):
         config.PROVISIONAL_ALERTS = False
         try:
             entry = {"last_bar": self.confirmed[-1].time}
-            m._emit_provisional("BTCUSDT", entry, self.confirmed, self.forming,
+            m._emit_provisional("BTCUSDT", entry, self.forming, self.live(),
                                 self.forming.time, [self.sender], False)
         finally:
             config.PROVISIONAL_ALERTS = saved
@@ -110,7 +114,7 @@ class TestProvisionalResolve(unittest.TestCase):
                  "provisional": {"bar": self.prov_bar, "kinds": [SELL]}}
 
         m._resolve_provisional("BTCUSDT", entry, signals, closed[-1].time,
-                               [self.sender], False)
+                               None, [], [self.sender], False)
 
         self.assertEqual(len(self.sender.cancelled), 1, "취소를 반드시 알려야 한다")
         self.assertEqual(self.sender.cancelled[0][2], [SELL])
@@ -125,7 +129,7 @@ class TestProvisionalResolve(unittest.TestCase):
         entry = {"last_bar": closed[-1].time,
                  "provisional": {"bar": self.prov_bar, "kinds": [SELL]}}
         m._resolve_provisional("BTCUSDT", entry, signals, closed[-1].time,
-                               [self.sender], False)
+                               None, [], [self.sender], False)
 
         self.assertEqual(self.sender.cancelled, [], "확정됐으면 취소를 보내면 안 된다")
         self.assertNotIn("provisional", entry)
@@ -133,10 +137,41 @@ class TestProvisionalResolve(unittest.TestCase):
     def test_waits_while_the_bar_is_still_open(self):
         entry = {"last_bar": 59 * HOUR,
                  "provisional": {"bar": self.prov_bar, "kinds": [SELL]}}
-        m._resolve_provisional("BTCUSDT", entry, [], 59 * HOUR, [self.sender], False)
+        m._resolve_provisional("BTCUSDT", entry, [], 59 * HOUR, None, [],
+                               [self.sender], False)
 
         self.assertEqual(self.sender.cancelled, [])
         self.assertIn("provisional", entry, "아직 닫히지 않았으면 그대로 둬야 한다")
+
+
+    def test_carries_forward_instead_of_contradicting_itself(self):
+        """되돌림으로 봉은 무효가 됐지만 다음 봉이 시작부터 같은 신호인 경우.
+
+        2026-08-31 실제 사례다. 08:00 봉은 마감 때 되돌아와 무효가 됐지만
+        09:00 봉은 시가부터 SELL 이었다. 여기서 취소를 보내면 몇 초 뒤 도착하는
+        잠정 알림과 정면으로 모순된다. 조용히 이어가는 것이 맞다.
+        """
+        closed = bars(RISING + [RECOVER])
+        signals = m.detect(closed)
+        entry = {"last_bar": closed[-1].time,
+                 "provisional": {"bar": self.prov_bar, "kinds": [SELL]}}
+
+        forming = Candle(time=closed[-1].time + HOUR, open=CRASH, high=CRASH,
+                         low=CRASH, close=CRASH, volume=1.0)
+        live = [s for s in m.detect(closed + [forming]) if s.bar_time == forming.time]
+        self.assertIn(SELL, [s.kind for s in live], "전제 확인: 새 봉도 SELL 이다")
+
+        m._resolve_provisional("BTCUSDT", entry, signals, closed[-1].time,
+                               forming, live, [self.sender], False)
+
+        self.assertEqual(self.sender.cancelled, [], "살아 있는 신호를 취소하면 안 된다")
+        self.assertEqual(entry["provisional"]["bar"], forming.time,
+                         "잠정 상태가 새 봉으로 넘어가야 한다")
+
+        # 이어받았으므로 잠정 알림도 다시 보내지 않는다.
+        m._emit_provisional("BTCUSDT", entry, forming, live,
+                            forming.time + 60000, [self.sender], False)
+        self.assertEqual(self.sender.provisional, [], "이어받은 신호를 재전송하면 안 된다")
 
 
 if __name__ == "__main__":
