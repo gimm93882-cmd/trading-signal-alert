@@ -1,5 +1,8 @@
 {
-  "BTCUSDT": {
+  "BTCUSDT@15m": {
+    "last_bar": 1788175800000
+  },
+  "BTCUSDT@1H": {
     "last_bar": 1788170400000
   }
 }
