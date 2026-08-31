@@ -15,7 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from bot import main as m          # noqa: E402
+from bot import config, main as m  # noqa: E402
 from bot.bitget import Candle      # noqa: E402
 from bot.signals import SELL       # noqa: E402
 
@@ -59,9 +59,17 @@ RECOVER = RISING[-1] + 0.15        # 되돌리면 교차가 없던 일이 된다
 
 class TestProvisionalEmit(unittest.TestCase):
     def setUp(self):
+        # 운영 기본값은 확정 전용(False)이다. 잠정 동작 자체를 검증하는
+        # 테스트이므로 여기서만 켜고, 끝나면 원래 값으로 되돌린다.
+        self._saved = config.PROVISIONAL_ALERTS
+        config.PROVISIONAL_ALERTS = True
+
         self.confirmed = bars(RISING)
         self.forming = bars(RISING + [CRASH])[-1]
         self.sender = FakeSender()
+
+    def tearDown(self):
+        config.PROVISIONAL_ALERTS = self._saved
 
     def live(self):
         return [s for s in m.detect(self.confirmed + [self.forming])
@@ -86,7 +94,6 @@ class TestProvisionalEmit(unittest.TestCase):
         self.assertEqual(len(sells), 1, "몇 분마다 실행돼도 한 번만 보내야 한다")
 
     def test_disabled_by_config(self):
-        from bot import config
         saved = config.PROVISIONAL_ALERTS
         config.PROVISIONAL_ALERTS = False
         try:
@@ -104,8 +111,13 @@ class TestProvisionalResolve(unittest.TestCase):
     """오늘 아침 실제로 일어난 상황: 장중에 뚫었다가 마감에 되돌아왔다."""
 
     def setUp(self):
+        self._saved = config.PROVISIONAL_ALERTS
+        config.PROVISIONAL_ALERTS = True
         self.sender = FakeSender()
         self.prov_bar = 60 * HOUR
+
+    def tearDown(self):
+        config.PROVISIONAL_ALERTS = self._saved
 
     def test_cancels_when_bar_closes_without_the_signal(self):
         closed = bars(RISING + [RECOVER])          # 되돌려서 교차가 사라진 봉
