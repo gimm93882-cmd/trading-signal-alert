@@ -12,8 +12,21 @@ SYMBOLS = [
 ]
 
 PRODUCT_TYPE = "usdt-futures"
-GRANULARITY = "1H"          # 선물은 대문자 H, 현물은 소문자 h
-BAR_SECONDS = 3600
+
+# 감시할 타임프레임. (Bitget granularity, 봉 길이 초, 표시 이름)
+#
+# 짧은 봉일수록 신호가 잦다. 15분봉은 1시간봉의 4배 속도로 봉이 닫히므로
+# 알림도 그만큼 늘어난다. 소음이 심하면 여기서 빼면 된다.
+TIMEFRAMES = [
+    ("1H", 3600, u"1시간봉"),
+    ("15m", 900, u"15분봉"),
+]
+
+# 알림을 보낼 신호 종류.
+#
+# BUY 로 롱 진입, SELL 로 롱 청산만 쓰고 숏은 들어가지 않으므로
+# SHORT/COVER 는 보내지 않는다. 지표는 그대로 계산하되 알림에서만 제외한다.
+SIGNAL_KINDS = ("BUY", "SELL")
 
 # 지표 워밍업용으로 넉넉히 받는다. EMA26 + 다이버전스 lookback 을 고려해도 충분하다.
 CANDLE_LIMIT = 300

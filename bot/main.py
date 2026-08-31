@@ -35,14 +35,16 @@ def main(argv=None):
         print("알림 채널: " + ", ".join(x.name for x in senders))
 
     state = _load_state()
+    _migrate_state(state)
     failures = []
 
     for symbol in symbols:
-        try:
-            _run_symbol(symbol, state, senders, args.dry_run)
-        except (BitgetError, notify.NotifyError) as err:
-            print("[%s] 실패: %s" % (symbol, err), file=sys.stderr)
-            failures.append(symbol)
+        for tf in config.TIMEFRAMES:
+            try:
+                _run_symbol(symbol, tf, state, senders, args.dry_run)
+            except (BitgetError, notify.NotifyError) as err:
+                print("[%s %s] 실패: %s" % (symbol, tf[2], err), file=sys.stderr)
+                failures.append("%s %s" % (symbol, tf[2]))
 
     if not args.dry_run:
         _save_state(state)
@@ -53,67 +55,73 @@ def main(argv=None):
     return 0
 
 
-def _run_symbol(symbol, state, senders, dry_run):
+def _run_symbol(symbol, tf, state, senders, dry_run):
+    granularity, bar_seconds, label = tf
+    key = "%s@%s" % (symbol, granularity)
     now = int(time.time() * 1000)
 
     # 형성 중인 봉까지 받아온다. 확정 판정에는 쓰지 않고, 트레이딩뷰 화면에
     # 지금 보이는 것과 같은 상태를 재현해 잠정 신호를 내는 데만 쓴다.
     rows = fetch_candles(
         symbol,
-        config.GRANULARITY,
+        granularity,
         config.PRODUCT_TYPE,
         config.CANDLE_LIMIT,
         include_forming=True,
+        bar_seconds=bar_seconds,
     )
     candles = [c for c in rows if c.is_closed(now)]
     forming = rows[-1] if rows and not rows[-1].is_closed(now) else None
 
     if not candles:
-        raise BitgetError("확정된 캔들이 없음: " + symbol)
+        raise BitgetError("확정된 캔들이 없음: %s %s" % (symbol, label))
 
     newest = candles[-1].time
-    signals = detect(candles)
+    signals = [s for s in detect(candles, label) if s.kind in config.SIGNAL_KINDS]
 
-    entry = state.get(symbol)
+    entry = state.get(key)
+    tag = "%s %s" % (symbol, label)
 
     # 첫 실행: 과거 300봉의 신호를 몰아서 보내면 안 된다. 기준점만 잡고 넘어간다.
     if entry is None:
-        state[symbol] = {"last_bar": newest}
-        print(
-            "[%s] 초기화 — 기준봉 %s. 다음 실행부터 알림을 보냅니다."
-            % (symbol, _kst(newest))
-        )
+        state[key] = {"last_bar": newest}
+        print("[%s] 초기화 — 기준봉 %s. 다음 실행부터 알림을 보냅니다."
+              % (tag, _kst(newest)))
         return
 
     last_bar = entry.get("last_bar", 0)
 
     if newest > last_bar:
-        _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run)
+        _emit_confirmed(tag, entry, signals, last_bar, newest, bar_seconds,
+                        senders, dry_run, symbol)
         entry["last_bar"] = newest
     else:
-        print("[%s] 새 확정봉 없음 (마지막 %s)" % (symbol, _kst(last_bar)))
+        print("[%s] 새 확정봉 없음 (마지막 %s)" % (tag, _kst(last_bar)))
 
     # 형성 중인 봉의 상태를 먼저 구한다. 취소 판정이 이 값을 봐야 하기 때문이다.
     live = []
     if forming is not None and config.PROVISIONAL_ALERTS:
-        live = [s for s in detect(candles + [forming]) if s.bar_time == forming.time]
+        live = [s for s in detect(candles + [forming], label)
+                if s.bar_time == forming.time and s.kind in config.SIGNAL_KINDS]
 
-    _resolve_provisional(symbol, entry, signals, newest, forming, live, senders, dry_run)
+    _resolve_provisional(tag, entry, signals, newest, forming, live,
+                         senders, dry_run, symbol, bar_seconds, label)
 
     if forming is not None:
-        _emit_provisional(symbol, entry, forming, live, now, senders, dry_run)
+        _emit_provisional(tag, entry, forming, live, now, senders, dry_run, symbol)
 
 
-def _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run):
+def _emit_confirmed(tag, entry, signals, last_bar, newest, bar_seconds,
+                    senders, dry_run, symbol):
     fresh = [s for s in signals if s.bar_time > last_bar]
     if not fresh:
-        print("[%s] 신호 없음 — %s 까지 확인" % (symbol, _kst(newest)))
+        print("[%s] 신호 없음 — %s 까지 확인" % (tag, _kst(newest)))
         return
 
     # 크론이 오래 멈춰 있었다면 지나간 신호를 하나씩 울리는 건 소음일 뿐이다.
-    cutoff = newest - config.MAX_BACKLOG_BARS * config.BAR_SECONDS * 1000
+    cutoff = newest - config.MAX_BACKLOG_BARS * bar_seconds * 1000
     if last_bar < cutoff:
-        print("[%s] 밀린 신호 %d건 — 요약으로 전송" % (symbol, len(fresh)))
+        print("[%s] 밀린 신호 %d건 — 요약으로 전송" % (tag, len(fresh)))
         if dry_run:
             for s in fresh:
                 print("    " + _line(s))
@@ -123,12 +131,13 @@ def _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run):
         return
 
     for s in fresh:
-        print("[%s] 확정 %s" % (symbol, _line(s)))
+        print("[%s] 확정 %s" % (tag, _line(s)))
         for sender in senders:
             sender.send_signal(symbol, s)
 
 
-def _resolve_provisional(symbol, entry, signals, newest, forming, live, senders, dry_run):
+def _resolve_provisional(tag, entry, signals, newest, forming, live, senders, dry_run,
+                         symbol=None, bar_seconds=3600, tf=""):
     """잠정으로 알렸던 봉이 닫혔으면, 확정됐는지 확인하고 아니면 취소를 알린다.
 
     잠정 신호는 봉 중간의 값으로 판정한 것이라 봉이 닫히면서 조건이 무효가 될 수 있다.
@@ -152,19 +161,19 @@ def _resolve_provisional(symbol, entry, signals, newest, forming, live, senders,
 
     if dropped:
         print("[%s] 잠정 취소 %s (%s 봉)"
-              % (symbol, "/".join(dropped), _kst(prov["bar"] + config.BAR_SECONDS * 1000)))
+              % (tag, "/".join(dropped), _kst(prov["bar"] + bar_seconds * 1000)))
         if not dry_run:
             for sender in senders:
-                sender.send_cancelled(symbol, prov["bar"], dropped)
+                sender.send_cancelled(symbol, prov["bar"], dropped, bar_seconds, tf)
 
     if carried and forming is not None:
-        print("[%s] 잠정 %s 유지 — 다음 봉으로 이어감" % (symbol, "/".join(carried)))
+        print("[%s] 잠정 %s 유지 — 다음 봉으로 이어감" % (tag, "/".join(carried)))
         entry["provisional"] = {"bar": forming.time, "kinds": sorted(carried)}
     else:
         entry.pop("provisional", None)
 
 
-def _emit_provisional(symbol, entry, forming, live, now, senders, dry_run):
+def _emit_provisional(tag, entry, forming, live, now, senders, dry_run, symbol=None):
     """형성 중인 봉에서 조건이 성립하면 봉 마감을 기다리지 않고 바로 알린다.
 
     확정만 기다리면 최대 1시간 늦는다. 차트를 계속 볼 수 없어서 알림을 쓰는데
@@ -179,8 +188,8 @@ def _emit_provisional(symbol, entry, forming, live, now, senders, dry_run):
     new = [s for s in live if s.kind not in sent]
 
     for s in new:
-        left = max(0, (forming.time + config.BAR_SECONDS * 1000 - now) // 60000)
-        print("[%s] 잠정 %s (마감 %d분 전)" % (symbol, _line(s), left))
+        left = max(0, (forming.time + forming.bar_seconds * 1000 - now) // 60000)
+        print("[%s] 잠정 %s (마감 %d분 전)" % (tag, _line(s), left))
         if not dry_run:
             for sender in senders:
                 sender.send_provisional(symbol, s, now)
@@ -195,20 +204,22 @@ def _emit_provisional(symbol, entry, forming, live, now, senders, dry_run):
 def _backfill(symbols, bars):
     """최근 N봉 구간의 신호를 표로 출력한다. TradingView 차트와 대조하기 위한 것."""
     for symbol in symbols:
+        granularity, bar_seconds, label = config.TIMEFRAMES[0]
         candles = fetch_candles(
             symbol,
-            config.GRANULARITY,
+            granularity,
             config.PRODUCT_TYPE,
             max(config.CANDLE_LIMIT, bars + config.LONG_LEN + config.DIV_LOOKBACK),
+            bar_seconds=bar_seconds,
         )
-        signals = detect(candles)
+        signals = [s for s in detect(candles, label) if s.kind in config.SIGNAL_KINDS]
 
         if bars < len(candles):
             floor = candles[-bars].time
             signals = [s for s in signals if s.bar_time >= floor]
 
         span = "%s ~ %s" % (_kst(candles[-min(bars, len(candles))].time), _kst(candles[-1].time))
-        print("\n=== %s  (확정봉 %d개, %s) ===" % (symbol, len(candles), span))
+        print("\n=== %s %s  (확정봉 %d개, %s) ===" % (symbol, label, len(candles), span))
         print("%-16s  %-6s  %12s  %8s  %s" % ("봉 마감(KST)", "신호", "종가", "Stoch%K", "비고"))
         print("-" * 72)
         for s in signals:
@@ -219,7 +230,7 @@ def _backfill(symbols, bars):
 
 def _line(s):
     return "%-16s  %-6s  %12s  %8s  %s" % (
-        _kst(s.bar_time + config.BAR_SECONDS * 1000),
+        _kst(s.bar_time + s.bar_seconds * 1000),
         s.kind,
         notify._price(s.close),
         notify._num(s.stoch_k, 1),
@@ -229,6 +240,22 @@ def _line(s):
 
 def _kst(ms):
     return datetime.fromtimestamp(ms / 1000.0, KST).strftime("%Y-%m-%d %H:%M")
+
+
+def _migrate_state(state):
+    """예전에는 심볼 하나에 상태 하나였다. 이제 타임프레임별로 나뉜다.
+
+    "BTCUSDT" -> "BTCUSDT@1H" 로 옮겨, 기존 사용자가 1시간봉 과거 신호를
+    다시 받는 일이 없게 한다.
+    """
+    for symbol in list(state):
+        if "@" in symbol:
+            continue
+        moved = "%s@1H" % symbol
+        if moved not in state:
+            state[moved] = state[symbol]
+            print("상태 이관: %s -> %s" % (symbol, moved))
+        del state[symbol]
 
 
 def _load_state():

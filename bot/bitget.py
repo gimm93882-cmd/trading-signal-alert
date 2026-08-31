@@ -24,11 +24,12 @@ class Candle:
     low: float
     close: float
     volume: float
+    bar_seconds: int = 3600     # 봉 길이. 타임프레임마다 다르다.
 
     @property
     def close_time(self) -> int:
-        """봉이 마감되는 시각 (ms). 1시간봉이면 시작 + 1시간."""
-        return self.time + 3600 * 1000
+        """봉이 마감되는 시각 (ms)."""
+        return self.time + self.bar_seconds * 1000
 
     def is_closed(self, now_ms: int) -> bool:
         return self.close_time <= now_ms
@@ -39,7 +40,7 @@ class BitgetError(RuntimeError):
 
 
 def fetch_candles(symbol, granularity, product_type, limit, now_ms=None,
-                  include_forming=False):
+                  include_forming=False, bar_seconds=3600):
     """캔들을 오래된 것부터 정렬해 돌려준다.
 
     Bitget 응답의 마지막 원소는 **아직 진행 중인 미완성 봉**이다.
@@ -83,6 +84,7 @@ def fetch_candles(symbol, granularity, product_type, limit, now_ms=None,
             low=float(row[3]),
             close=float(row[4]),
             volume=float(row[5]),
+            bar_seconds=bar_seconds,
         )
         if include_forming or c.close_time <= now_ms:
             candles.append(c)

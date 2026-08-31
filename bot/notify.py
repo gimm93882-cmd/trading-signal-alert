@@ -75,10 +75,11 @@ def _signal_fields(sig, closed_at, provisional):
 
 def send_signal(symbol: str, sig: Signal, url: str) -> None:
     style = STYLE[sig.kind]
-    closed_at = datetime.fromtimestamp((sig.bar_time + 3600 * 1000) / 1000.0, KST)
+    closed_at = datetime.fromtimestamp(
+        (sig.bar_time + sig.bar_seconds * 1000) / 1000.0, KST)
 
     embed = {
-        "title": "%s %s 확정 · %s 1H" % (style["emoji"], style["label"], symbol),
+        "title": "%s %s · %s %s" % (style["emoji"], style["label"], symbol, sig.tf or "1H"),
         "description": style["desc"],
         "color": style["color"],
         "fields": _signal_fields(sig, closed_at, False),
@@ -96,12 +97,12 @@ def send_provisional(symbol: str, sig: Signal, url: str, now_ms: int) -> None:
     확정 신호와 헷갈리지 않게 한다.
     """
     style = STYLE[sig.kind]
-    closes_at_ms = sig.bar_time + 3600 * 1000
+    closes_at_ms = sig.bar_time + sig.bar_seconds * 1000
     closed_at = datetime.fromtimestamp(closes_at_ms / 1000.0, KST)
     left = max(0, (closes_at_ms - now_ms) // 60000)
 
     embed = {
-        "title": "\u26A1 %s 잠정 · %s 1H" % (style["label"], symbol),
+        "title": "\u26A1 %s 잠정 · %s %s" % (style["label"], symbol, sig.tf or "1H"),
         "description": "%s — **아직 확정 아님** (마감 %d분 전)\n%s"
                        % (style["desc"], left, PROVISIONAL_NOTE),
         "color": PROVISIONAL_COLOR,
@@ -111,13 +112,14 @@ def send_provisional(symbol: str, sig: Signal, url: str, now_ms: int) -> None:
     _post(url, {"embeds": [embed]})
 
 
-def send_cancelled(symbol: str, bar_time: int, kinds, url: str) -> None:
+def send_cancelled(symbol: str, bar_time: int, kinds, url: str,
+                   bar_seconds: int = 3600, tf: str = "") -> None:
     """잠정으로 알렸던 신호가 봉 마감과 함께 무효가 됐을 때."""
-    closed_at = datetime.fromtimestamp((bar_time + 3600 * 1000) / 1000.0, KST)
+    closed_at = datetime.fromtimestamp((bar_time + bar_seconds * 1000) / 1000.0, KST)
     labels = " · ".join(STYLE[k]["label"] for k in kinds)
 
     embed = {
-        "title": "\u2716 %s 잠정 취소 · %s 1H" % (labels, symbol),
+        "title": "\u2716 %s 잠정 취소 · %s %s" % (labels, symbol, tf or "1H"),
         "description": "%s 봉 기준 %s"
                        % (closed_at.strftime("%m/%d %H:%M"), CANCELLED_NOTE),
         "color": CANCELLED_COLOR,
@@ -130,7 +132,8 @@ def send_backlog_summary(symbol: str, signals: List[Signal], url: str) -> None:
     """오래 멈춰 있다 재개된 경우, 개별 전송 대신 요약 1건만 보낸다."""
     lines = []
     for sig in signals:
-        closed_at = datetime.fromtimestamp((sig.bar_time + 3600 * 1000) / 1000.0, KST)
+        closed_at = datetime.fromtimestamp(
+        (sig.bar_time + sig.bar_seconds * 1000) / 1000.0, KST)
         lines.append(
             "`%s`  %s  %s"
             % (closed_at.strftime("%m/%d %H:%M"), sig.kind.ljust(5), _price(sig.close))
@@ -230,8 +233,8 @@ class DiscordNotifier:
     def send_provisional(self, symbol, sig, now_ms):
         send_provisional(symbol, sig, self.url, now_ms)
 
-    def send_cancelled(self, symbol, bar_time, kinds):
-        send_cancelled(symbol, bar_time, kinds, self.url)
+    def send_cancelled(self, symbol, bar_time, kinds, bar_seconds=3600, tf=""):
+        send_cancelled(symbol, bar_time, kinds, self.url, bar_seconds, tf)
 
 
 def build_senders():

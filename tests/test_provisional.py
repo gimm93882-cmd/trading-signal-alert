@@ -34,7 +34,7 @@ class FakeSender:
     def send_signal(self, symbol, sig):
         self.confirmed.append((symbol, sig.kind, sig.bar_time))
 
-    def send_cancelled(self, symbol, bar_time, kinds):
+    def send_cancelled(self, symbol, bar_time, kinds, bar_seconds=3600, tf=""):
         self.cancelled.append((symbol, bar_time, list(kinds)))
 
     def send_backlog_summary(self, symbol, signals):

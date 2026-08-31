@@ -31,9 +31,11 @@ class Signal:
     macd: Optional[float]
     macd_signal: Optional[float]
     reason: str = ""           # SHORT 일 때 어떤 필터가 걸렸는지
+    bar_seconds: int = 3600    # 이 신호가 나온 봉의 길이
+    tf: str = ""               # 표시용 타임프레임 이름 ("1시간봉")
 
 
-def detect(candles: List[Candle]) -> List[Signal]:
+def detect(candles: List[Candle], tf: str = "") -> List[Signal]:
     """확정된 캔들 목록에서 발생한 모든 신호를 시간순으로 돌려준다."""
     closes = [c.close for c in candles]
     highs = [c.high for c in candles]
@@ -82,6 +84,8 @@ def detect(candles: List[Candle]) -> List[Signal]:
                 macd=macd_line[i],
                 macd_signal=macd_sig[i],
                 reason=reason,
+                bar_seconds=candles[i].bar_seconds,
+                tf=tf,
             )
 
         if buy:
