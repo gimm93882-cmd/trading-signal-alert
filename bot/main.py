@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 from . import config, notify
@@ -53,12 +54,20 @@ def main(argv=None):
 
 
 def _run_symbol(symbol, state, senders, dry_run):
-    candles = fetch_candles(
+    now = int(time.time() * 1000)
+
+    # 형성 중인 봉까지 받아온다. 확정 판정에는 쓰지 않고, 트레이딩뷰 화면에
+    # 지금 보이는 것과 같은 상태를 재현해 잠정 신호를 내는 데만 쓴다.
+    rows = fetch_candles(
         symbol,
         config.GRANULARITY,
         config.PRODUCT_TYPE,
         config.CANDLE_LIMIT,
+        include_forming=True,
     )
+    candles = [c for c in rows if c.is_closed(now)]
+    forming = rows[-1] if rows and not rows[-1].is_closed(now) else None
+
     if not candles:
         raise BitgetError("확정된 캔들이 없음: " + symbol)
 
@@ -77,22 +86,28 @@ def _run_symbol(symbol, state, senders, dry_run):
         return
 
     last_bar = entry.get("last_bar", 0)
-    if newest <= last_bar:
+
+    if newest > last_bar:
+        _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run)
+        entry["last_bar"] = newest
+    else:
         print("[%s] 새 확정봉 없음 (마지막 %s)" % (symbol, _kst(last_bar)))
-        return
 
+    _resolve_provisional(symbol, entry, signals, newest, senders, dry_run)
+
+    if forming is not None:
+        _emit_provisional(symbol, entry, candles, forming, now, senders, dry_run)
+
+
+def _emit_confirmed(symbol, entry, signals, last_bar, newest, senders, dry_run):
     fresh = [s for s in signals if s.bar_time > last_bar]
-
     if not fresh:
         print("[%s] 신호 없음 — %s 까지 확인" % (symbol, _kst(newest)))
-        state[symbol]["last_bar"] = newest
         return
 
     # 크론이 오래 멈춰 있었다면 지나간 신호를 하나씩 울리는 건 소음일 뿐이다.
     cutoff = newest - config.MAX_BACKLOG_BARS * config.BAR_SECONDS * 1000
-    stale = last_bar < cutoff
-
-    if stale:
+    if last_bar < cutoff:
         print("[%s] 밀린 신호 %d건 — 요약으로 전송" % (symbol, len(fresh)))
         if dry_run:
             for s in fresh:
@@ -100,13 +115,68 @@ def _run_symbol(symbol, state, senders, dry_run):
         else:
             for sender in senders:
                 sender.send_backlog_summary(symbol, fresh)
-    else:
-        for s in fresh:
-            print("[%s] %s" % (symbol, _line(s)))
-            for sender in senders:
-                sender.send_signal(symbol, s)
+        return
 
-    state[symbol]["last_bar"] = newest
+    for s in fresh:
+        print("[%s] 확정 %s" % (symbol, _line(s)))
+        for sender in senders:
+            sender.send_signal(symbol, s)
+
+
+def _resolve_provisional(symbol, entry, signals, newest, senders, dry_run):
+    """잠정으로 알렸던 봉이 닫혔으면, 확정됐는지 확인하고 아니면 취소를 알린다.
+
+    잠정 신호는 봉 중간의 값으로 판정한 것이라 봉이 닫히면서 조건이 무효가 될 수 있다.
+    알리고 끝내면 사용자는 없어진 신호를 붙잡고 있게 되므로 반드시 뒷정리를 보낸다.
+    """
+    prov = entry.get("provisional")
+    if not prov or prov["bar"] > newest:
+        return                                  # 아직 그 봉이 닫히지 않았다
+
+    held = {s.kind for s in signals if s.bar_time == prov["bar"]}
+    dropped = [k for k in prov["kinds"] if k not in held]
+
+    if dropped:
+        print("[%s] 잠정 취소 %s (%s 봉)"
+              % (symbol, "/".join(dropped), _kst(prov["bar"] + config.BAR_SECONDS * 1000)))
+        if not dry_run:
+            for sender in senders:
+                sender.send_cancelled(symbol, prov["bar"], dropped)
+
+    entry.pop("provisional", None)
+
+
+def _emit_provisional(symbol, entry, candles, forming, now, senders, dry_run):
+    """형성 중인 봉에서 조건이 성립하면 봉 마감을 기다리지 않고 바로 알린다.
+
+    확정만 기다리면 최대 1시간 늦는다. 차트를 계속 볼 수 없어서 알림을 쓰는데
+    차트보다 느리면 알림의 목적이 사라진다. 대신 확정이 아님을 명시해서 보낸다.
+    같은 봉·같은 종류는 한 번만 보낸다(10분마다 재전송 방지).
+    """
+    if not config.PROVISIONAL_ALERTS:
+        return
+
+    live = detect(candles + [forming])
+    fresh = [s for s in live if s.bar_time == forming.time]
+    if not fresh:
+        return
+
+    prov = entry.get("provisional")
+    sent = set(prov["kinds"]) if prov and prov["bar"] == forming.time else set()
+    new = [s for s in fresh if s.kind not in sent]
+
+    for s in new:
+        left = max(0, (forming.time + config.BAR_SECONDS * 1000 - now) // 60000)
+        print("[%s] 잠정 %s (마감 %d분 전)" % (symbol, _line(s), left))
+        if not dry_run:
+            for sender in senders:
+                sender.send_provisional(symbol, s, now)
+
+    # dry-run 이면 _save_state 가 호출되지 않으므로 여기서 따로 가를 필요가 없다.
+    entry["provisional"] = {
+        "bar": forming.time,
+        "kinds": sorted(sent | {s.kind for s in new}),
+    }
 
 
 def _backfill(symbols, bars):

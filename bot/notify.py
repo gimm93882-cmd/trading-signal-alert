@@ -28,6 +28,13 @@ STYLE = {
 
 FOOTER = "자동 계산된 기술적 지표입니다. 투자 판단과 그 결과는 본인 책임입니다."
 
+# 잠정 신호: 봉이 아직 닫히지 않았다. 트레이딩뷰 화면에 지금 보이는 것과 같은 상태이며,
+# 봉이 닫히면서 조건이 무효가 되면 사라진다(리페인팅). 그래서 확정 신호와 반드시 구분한다.
+PROVISIONAL_COLOR = 10070709      # 회색 — 확정 신호의 원색과 구분
+CANCELLED_COLOR = 6323595
+PROVISIONAL_NOTE = "봉이 닫히기 전이라 사라질 수 있습니다. 확정 알림이 뒤따릅니다."
+CANCELLED_NOTE = "봉이 닫히면서 조건이 무효가 됐습니다. 이 신호로 진입하지 마세요."
+
 
 class NotifyError(RuntimeError):
     pass
@@ -44,13 +51,13 @@ def webhook_url():
     return url
 
 
-def send_signal(symbol: str, sig: Signal, url: str) -> None:
-    style = STYLE[sig.kind]
-    closed_at = datetime.fromtimestamp((sig.bar_time + 3600 * 1000) / 1000.0, KST)
-
+def _signal_fields(sig, closed_at, provisional):
     fields = [
         _field("종가", _price(sig.close)),
-        _field("봉 마감 (KST)", closed_at.strftime("%m/%d %H:%M")),
+        _field(
+            "마감 예정 (KST)" if provisional else "봉 마감 (KST)",
+            closed_at.strftime("%m/%d %H:%M"),
+        ),
         _field(
             "EMA",
             "단기 %s\n장기 %s" % (_price(sig.ema_short), _price(sig.ema_long)),
@@ -63,14 +70,58 @@ def send_signal(symbol: str, sig: Signal, url: str) -> None:
     ]
     if sig.reason:
         fields.append(_field("트리거", sig.reason, inline=False))
+    return fields
+
+
+def send_signal(symbol: str, sig: Signal, url: str) -> None:
+    style = STYLE[sig.kind]
+    closed_at = datetime.fromtimestamp((sig.bar_time + 3600 * 1000) / 1000.0, KST)
 
     embed = {
-        "title": "%s %s · %s 1H" % (style["emoji"], style["label"], symbol),
+        "title": "%s %s 확정 · %s 1H" % (style["emoji"], style["label"], symbol),
         "description": style["desc"],
         "color": style["color"],
-        "fields": fields,
+        "fields": _signal_fields(sig, closed_at, False),
         "footer": {"text": FOOTER},
         "timestamp": closed_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    _post(url, {"embeds": [embed]})
+
+
+def send_provisional(symbol: str, sig: Signal, url: str, now_ms: int) -> None:
+    """봉이 닫히기 전에 조건이 성립한 시점에 바로 보낸다.
+
+    차트를 계속 볼 수 없어서 알림을 쓰는 것이므로, 확정까지 최대 1시간을
+    기다리게 하면 알림의 목적 자체가 사라진다. 대신 **확정이 아님을 제목에 박아**
+    확정 신호와 헷갈리지 않게 한다.
+    """
+    style = STYLE[sig.kind]
+    closes_at_ms = sig.bar_time + 3600 * 1000
+    closed_at = datetime.fromtimestamp(closes_at_ms / 1000.0, KST)
+    left = max(0, (closes_at_ms - now_ms) // 60000)
+
+    embed = {
+        "title": "\u26A1 %s 잠정 · %s 1H" % (style["label"], symbol),
+        "description": "%s — **아직 확정 아님** (마감 %d분 전)\n%s"
+                       % (style["desc"], left, PROVISIONAL_NOTE),
+        "color": PROVISIONAL_COLOR,
+        "fields": _signal_fields(sig, closed_at, True),
+        "footer": {"text": FOOTER},
+    }
+    _post(url, {"embeds": [embed]})
+
+
+def send_cancelled(symbol: str, bar_time: int, kinds, url: str) -> None:
+    """잠정으로 알렸던 신호가 봉 마감과 함께 무효가 됐을 때."""
+    closed_at = datetime.fromtimestamp((bar_time + 3600 * 1000) / 1000.0, KST)
+    labels = " · ".join(STYLE[k]["label"] for k in kinds)
+
+    embed = {
+        "title": "\u2716 %s 잠정 취소 · %s 1H" % (labels, symbol),
+        "description": "%s 봉 기준 %s"
+                       % (closed_at.strftime("%m/%d %H:%M"), CANCELLED_NOTE),
+        "color": CANCELLED_COLOR,
+        "footer": {"text": FOOTER},
     }
     _post(url, {"embeds": [embed]})
 
@@ -175,6 +226,12 @@ class DiscordNotifier:
 
     def send_backlog_summary(self, symbol, signals):
         send_backlog_summary(symbol, signals, self.url)
+
+    def send_provisional(self, symbol, sig, now_ms):
+        send_provisional(symbol, sig, self.url, now_ms)
+
+    def send_cancelled(self, symbol, bar_time, kinds):
+        send_cancelled(symbol, bar_time, kinds, self.url)
 
 
 def build_senders():

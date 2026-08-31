@@ -30,17 +30,25 @@ class Candle:
         """봉이 마감되는 시각 (ms). 1시간봉이면 시작 + 1시간."""
         return self.time + 3600 * 1000
 
+    def is_closed(self, now_ms: int) -> bool:
+        return self.close_time <= now_ms
+
 
 class BitgetError(RuntimeError):
     pass
 
 
-def fetch_candles(symbol, granularity, product_type, limit, now_ms=None):
-    """확정된(마감된) 캔들만 오래된 것부터 정렬해 돌려준다.
+def fetch_candles(symbol, granularity, product_type, limit, now_ms=None,
+                  include_forming=False):
+    """캔들을 오래된 것부터 정렬해 돌려준다.
 
     Bitget 응답의 마지막 원소는 **아직 진행 중인 미완성 봉**이다.
-    이걸 그대로 쓰면 봉이 마감되기 전 값으로 신호가 떴다가 사라지는
-    리페인팅이 발생한다. 마감 시각이 지난 봉만 남기는 것이 이 함수의 핵심이다.
+    기본값(include_forming=False)은 이걸 잘라내고 마감된 봉만 준다.
+    확정 신호는 반드시 이쪽을 써야 리페인팅이 없다.
+
+    include_forming=True 면 미완성 봉까지 포함한다. 트레이딩뷰 화면에
+    **지금 보이는 것과 같은 상태**를 재현하기 위한 것으로, 잠정 신호 판정에만 쓴다.
+    이 봉의 신호는 봉이 닫히면서 사라질 수 있다는 전제로 다뤄야 한다.
     """
     limit = max(1, min(int(limit), MAX_LIMIT))   # Bitget 상한
 
@@ -76,7 +84,7 @@ def fetch_candles(symbol, granularity, product_type, limit, now_ms=None):
             close=float(row[4]),
             volume=float(row[5]),
         )
-        if c.close_time <= now_ms:      # 마감된 봉만
+        if include_forming or c.close_time <= now_ms:
             candles.append(c)
 
     candles.sort(key=lambda c: c.time)

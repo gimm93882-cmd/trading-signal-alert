@@ -14,7 +14,10 @@ from email.message import EmailMessage
 from typing import List
 
 from .signals import BUY, COVER, SELL, SHORT, Signal
-from .notify import FOOTER, KST, STYLE, _num, _price, NotifyError
+from .notify import (
+    CANCELLED_NOTE, FOOTER, KST, PROVISIONAL_NOTE, STYLE,
+    _num, _price, NotifyError,
+)
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
@@ -51,18 +54,57 @@ class EmailNotifier:
 
     def send_signal(self, symbol: str, sig: Signal) -> None:
         style = STYLE[sig.kind]
-        closed = datetime.fromtimestamp((sig.bar_time + 3600 * 1000) / 1000.0, KST)
-
-        subject = "%s %s · %s · %s" % (
+        subject = "%s %s 확정 · %s · %s" % (
             style["emoji"], style["label"], symbol, _price(sig.close)
         )
+        head = ["%s 확정 (%s)" % (style["label"], style["desc"]), ""]
+        self._send(subject, "\n".join(head + self._detail(symbol, sig, False)))
 
-        lines = [
-            "%s (%s)" % (style["label"], style["desc"]),
+    def send_provisional(self, symbol: str, sig: Signal, now_ms: int) -> None:
+        """봉 마감을 기다리지 않고 조건이 성립한 즉시 보낸다.
+
+        푸시에 보이는 건 제목 한 줄뿐이므로, **'잠정'을 제목 맨 앞에** 둬서
+        확정 신호와 한눈에 구분되게 한다.
+        """
+        style = STYLE[sig.kind]
+        left = max(0, (sig.bar_time + 3600 * 1000 - now_ms) // 60000)
+
+        subject = "\u26A1 잠정 %s · %s · %s (마감 %d분 전)" % (
+            style["label"], symbol, _price(sig.close), left
+        )
+        head = [
+            "%s 조건 성립 — 아직 확정 아님 (%s)" % (style["label"], style["desc"]),
+            PROVISIONAL_NOTE,
+            "",
+        ]
+        self._send(subject, "\n".join(head + self._detail(symbol, sig, True)))
+
+    def send_cancelled(self, symbol: str, bar_time: int, kinds) -> None:
+        closed = datetime.fromtimestamp((bar_time + 3600 * 1000) / 1000.0, KST)
+        labels = " · ".join(STYLE[k]["label"] for k in kinds)
+
+        subject = "\u2716 잠정 %s 취소 · %s" % (labels, symbol)
+        body = "\n".join([
+            "%s 잠정 신호가 확정되지 않았습니다." % labels,
+            CANCELLED_NOTE,
             "",
             "종목        %s  1시간봉" % symbol,
-            "종가        %s" % _price(sig.close),
-            "봉 마감     %s KST" % closed.strftime("%Y-%m-%d %H:%M"),
+            "해당 봉     %s KST 마감" % closed.strftime("%Y-%m-%d %H:%M"),
+            "",
+            "-" * 40,
+            FOOTER,
+        ])
+        self._send(subject, body)
+
+    def _detail(self, symbol, sig, provisional):
+        closed = datetime.fromtimestamp((sig.bar_time + 3600 * 1000) / 1000.0, KST)
+        lines = [
+            "종목        %s  1시간봉" % symbol,
+            "%s        %s" % ("현재가" if provisional else "종가", _price(sig.close)),
+            "%s   %s KST" % (
+                "마감 예정  " if provisional else "봉 마감    ",
+                closed.strftime("%Y-%m-%d %H:%M"),
+            ),
             "",
             "EMA 단기    %s" % _price(sig.ema_short),
             "EMA 장기    %s" % _price(sig.ema_long),
@@ -71,9 +113,7 @@ class EmailNotifier:
         ]
         if sig.reason:
             lines += ["", "트리거      %s" % sig.reason]
-        lines += ["", "-" * 40, FOOTER]
-
-        self._send(subject, "\n".join(lines))
+        return lines + ["", "-" * 40, FOOTER]
 
     def send_backlog_summary(self, symbol: str, signals: List[Signal]) -> None:
         subject = "⏸ %s · 놓친 신호 %d건" % (symbol, len(signals))
