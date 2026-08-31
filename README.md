@@ -397,3 +397,13 @@ state.json        마지막으로 처리한 봉 (중복 알림 방지)
 이 도구는 가격 데이터로 기술적 지표를 계산해 알려줄 뿐입니다.
 매매 권유가 아니며, 신호의 정확성이나 수익성을 보장하지 않습니다.
 투자 판단과 그 결과는 전적으로 사용자 본인의 책임입니다.
+
+
+## 복리 계산기
+
+별도 저장소로 분리해 GitHub Pages 로 배포했습니다.
+이 저장소는 3분마다 state.json 을 커밋하므로 같이 두면 매번 재배포가 걸립니다.
+
+- 사이트 https://gimm93882-cmd.github.io/compound-calculator/
+- 저장소 https://github.com/gimm93882-cmd/compound-calculator
+- 로컬 `~/Desktop/복리계산기`
