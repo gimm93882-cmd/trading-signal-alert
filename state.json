@@ -1,5 +1,11 @@
 {
   "BTCUSDT@1H": {
-    "last_bar": 1788246000000
+    "last_bar": 1788246000000,
+    "provisional": {
+      "bar": 1788249600000,
+      "kinds": [
+        "SELL"
+      ]
+    }
   }
 }
