@@ -25,7 +25,6 @@ PRODUCT_TYPE = "usdt-futures"
 #
 # 짧은 봉일수록 신호가 잦다. 실측으로 1시간봉은 하루 1건, 15분봉은 하루 4.6건이다.
 TIMEFRAMES = [
-    ("1H", 3600, u"1시간봉", True),
     ("15m", 900, u"15분봉", False),
 ]
 
