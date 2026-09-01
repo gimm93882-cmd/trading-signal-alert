@@ -49,15 +49,28 @@ class TestTimeframeConfig(unittest.TestCase):
         """
         self.assertTrue(config.TIMEFRAMES)
         for t in config.TIMEFRAMES:
-            self.assertEqual(len(t), 3, "(granularity, 봉 길이 초, 표시 이름) 형식")
+            self.assertGreaterEqual(len(t), 3,
+                                    "(granularity, 봉 길이 초, 표시 이름[, 잠정]) 형식")
             self.assertIsInstance(t[1], int)
             self.assertTrue(t[2])
+            if len(t) > 3:
+                self.assertIsInstance(t[3], bool)
 
     def test_bar_seconds_match_granularity(self):
-        for g, secs, _ in config.TIMEFRAMES:
+        for t in config.TIMEFRAMES:
+            g, secs = t[0], t[1]
             expect = {"1H": 3600, "15m": 900}.get(g)
             if expect:
                 self.assertEqual(secs, expect, "%s 의 봉 길이가 어긋난다" % g)
+
+    def test_long_bars_use_provisional(self):
+        """봉이 길수록 마감을 기다리는 비용이 크므로 잠정 알림이 필요하다.
+
+        1시간 이상 봉을 확정만으로 두면 트레이딩뷰 화면보다 최대 한 봉 늦는다.
+        """
+        for t in config.TIMEFRAMES:
+            if t[1] >= 3600 and len(t) > 3:
+                self.assertTrue(t[3], "%s 는 잠정 알림이 켜져 있어야 한다" % t[2])
 
     def test_short_and_cover_excluded(self):
         self.assertNotIn(SHORT, config.SIGNAL_KINDS)

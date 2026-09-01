@@ -93,16 +93,27 @@ class TestProvisionalEmit(unittest.TestCase):
         sells = [k for _, k, _ in self.sender.provisional if k == SELL]
         self.assertEqual(len(sells), 1, "몇 분마다 실행돼도 한 번만 보내야 한다")
 
-    def test_disabled_by_config(self):
+    def test_gate_respects_global_switch(self):
+        """전체 스위치가 꺼지면 타임프레임 설정과 무관하게 잠정을 쓰지 않는다.
+
+        판정은 호출부(_run_symbol)에서 하므로 그 판정 함수를 직접 검사한다.
+        """
         saved = config.PROVISIONAL_ALERTS
-        config.PROVISIONAL_ALERTS = False
         try:
-            entry = {"last_bar": self.confirmed[-1].time}
-            m._emit_provisional("BTCUSDT", entry, self.forming, self.live(),
-                                self.forming.time, [self.sender], False)
+            config.PROVISIONAL_ALERTS = False
+            self.assertFalse(m.wants_provisional(("1H", 3600, u"1시간봉", True)))
+            config.PROVISIONAL_ALERTS = True
+            self.assertTrue(m.wants_provisional(("1H", 3600, u"1시간봉", True)))
+            self.assertFalse(m.wants_provisional(("15m", 900, u"15분봉", False)))
+            # 4번째 값이 없는 예전 형식은 켜진 것으로 본다
+            self.assertTrue(m.wants_provisional(("1H", 3600, u"1시간봉")))
         finally:
             config.PROVISIONAL_ALERTS = saved
 
+    def test_no_live_signal_sends_nothing(self):
+        entry = {"last_bar": self.confirmed[-1].time}
+        m._emit_provisional("BTCUSDT", entry, self.forming, [],
+                            self.forming.time, [self.sender], False)
         self.assertEqual(self.sender.provisional, [])
         self.assertNotIn("provisional", entry)
 

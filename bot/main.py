@@ -55,8 +55,21 @@ def main(argv=None):
     return 0
 
 
+def wants_provisional(tf):
+    """이 타임프레임이 잠정 알림을 쓰는가.
+
+    타임프레임 항목의 4번째 값이 개별 설정이고, config.PROVISIONAL_ALERTS 가
+    전체 스위치다. 전체가 꺼져 있으면 개별 설정과 무관하게 끈다.
+    항목에 4번째 값이 없으면(예전 형식) 켜진 것으로 본다.
+    """
+    if not config.PROVISIONAL_ALERTS:
+        return False
+    return tf[3] if len(tf) > 3 else True
+
+
 def _run_symbol(symbol, tf, state, senders, dry_run):
-    granularity, bar_seconds, label = tf
+    granularity, bar_seconds, label = tf[0], tf[1], tf[2]
+    want_prov = wants_provisional(tf)
     key = "%s@%s" % (symbol, granularity)
     now = int(time.time() * 1000)
 
@@ -100,14 +113,14 @@ def _run_symbol(symbol, tf, state, senders, dry_run):
 
     # 형성 중인 봉의 상태를 먼저 구한다. 취소 판정이 이 값을 봐야 하기 때문이다.
     live = []
-    if forming is not None and config.PROVISIONAL_ALERTS:
+    if forming is not None and want_prov:
         live = [s for s in detect(candles + [forming], label)
                 if s.bar_time == forming.time and s.kind in config.SIGNAL_KINDS]
 
     _resolve_provisional(tag, entry, signals, newest, forming, live,
                          senders, dry_run, symbol, bar_seconds, label)
 
-    if forming is not None:
+    if forming is not None and want_prov:
         _emit_provisional(tag, entry, forming, live, now, senders, dry_run, symbol)
 
 
@@ -180,7 +193,7 @@ def _emit_provisional(tag, entry, forming, live, now, senders, dry_run, symbol=N
     차트보다 느리면 알림의 목적이 사라진다. 대신 확정이 아님을 명시해서 보낸다.
     같은 봉·같은 종류는 한 번만 보낸다(10분마다 재전송 방지).
     """
-    if not config.PROVISIONAL_ALERTS or not live:
+    if not live:
         return
 
     prov = entry.get("provisional")
@@ -204,7 +217,7 @@ def _emit_provisional(tag, entry, forming, live, now, senders, dry_run, symbol=N
 def _backfill(symbols, bars):
     """최근 N봉 구간의 신호를 표로 출력한다. TradingView 차트와 대조하기 위한 것."""
     for symbol in symbols:
-        granularity, bar_seconds, label = config.TIMEFRAMES[0]
+        granularity, bar_seconds, label = config.TIMEFRAMES[0][:3]
         candles = fetch_candles(
             symbol,
             granularity,
