@@ -73,6 +73,14 @@ DIV_LOOKBACK = 5
 # 잠정 알림의 전체 스위치. TIMEFRAMES 의 개별 설정보다 우선한다.
 # False 로 두면 모든 타임프레임이 확정 신호만 보낸다.
 PROVISIONAL_ALERTS = True
+# 이메일(Gmail) 알림을 보낼지.
+#
+# False 면 GMAIL_USER / GMAIL_APP_PASSWORD / MAIL_TO 가 그대로 설정돼 있어도
+# 메일을 한 통도 보내지 않는다. 수신자 전원에게 나가는 채널이라
+# 환경변수를 지우는 것보다 여기서 끄는 편이 되돌리기 쉽다.
+# 디스코드 알림은 영향을 받지 않는다.
+EMAIL_ALERTS = False
+
 # 크론이 밀리거나 건너뛰었을 때 소급해서 보낼 최대 봉 수.
 # 이보다 더 오래 멈춰 있었다면 개별 전송 대신 요약 1건만 보낸다.
 MAX_BACKLOG_BARS = 24

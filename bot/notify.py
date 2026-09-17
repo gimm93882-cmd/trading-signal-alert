@@ -243,14 +243,18 @@ def build_senders():
     디스코드와 이메일을 둘 다 설정하면 같은 신호가 양쪽으로 나간다.
     한쪽이 막혀도 다른 쪽이 도착하도록 하는 게 목적이다.
     """
+    from . import config
     from .notify_email import EmailNotifier
 
-    senders = [n for n in (DiscordNotifier.from_env(), EmailNotifier.from_env()) if n]
+    email = EmailNotifier.from_env() if getattr(config, "EMAIL_ALERTS", True) else None
+    senders = [n for n in (DiscordNotifier.from_env(), email) if n]
     if not senders:
         raise NotifyError(
             "알림 채널이 하나도 설정되지 않았습니다.\n"
             "  디스코드: " + ENV_KEY + "\n"
             "  이메일  : GMAIL_USER + GMAIL_APP_PASSWORD (+ 선택 MAIL_TO)\n"
-            "둘 중 하나 이상을 환경변수 또는 GitHub Secret 으로 설정하세요."
+            + ("           (지금은 config.EMAIL_ALERTS = False 라 꺼져 있습니다)\n"
+               if not getattr(config, "EMAIL_ALERTS", True) else "")
+            + "둘 중 하나 이상을 환경변수 또는 GitHub Secret 으로 설정하세요."
         )
     return senders
