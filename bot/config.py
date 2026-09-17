@@ -73,6 +73,17 @@ DIV_LOOKBACK = 5
 # 잠정 알림의 전체 스위치. TIMEFRAMES 의 개별 설정보다 우선한다.
 # False 로 두면 모든 타임프레임이 확정 신호만 보낸다.
 PROVISIONAL_ALERTS = True
+# 알림을 보낼지 말지의 전체 스위치.
+#
+# False 면 디스코드·이메일 어느 쪽으로도 한 건도 나가지 않는다.
+# 다만 봇은 평소대로 돌면서 state.json 의 기준봉을 계속 앞으로 민다.
+# 멈춰 세우지 않는 이유가 여기 있다 — 실행 자체를 껐다가 나중에 다시 켜면
+# 그동안 쌓인 신호가 한꺼번에 쏟아진다. 조용히 돌려두면 다시 켠 시점부터
+# 새 신호만 온다.
+#
+# 다시 받으려면 True 로 바꾸면 된다.
+ALERTS_ENABLED = False
+
 # 이메일(Gmail) 알림을 보낼지.
 #
 # False 면 GMAIL_USER / GMAIL_APP_PASSWORD / MAIL_TO 가 그대로 설정돼 있어도

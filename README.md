@@ -7,6 +7,32 @@ TradingView 인디케이터 `Trend Ribbon + Buy/Sell + Short Cycle` 의 신호�
 
 ---
 
+## ⏸ 지금 알림이 꺼져 있습니다
+
+`bot/config.py` 의 `ALERTS_ENABLED = False` 때문에 **디스코드·이메일 어느 쪽으로도
+나가지 않습니다.** 봇은 3분마다 그대로 돌면서 신호를 계산하고 `state.json` 의
+기준봉만 앞으로 밉니다.
+
+실행 자체를 끄지 않는 이유가 있습니다. 껐다가 나중에 켜면 그동안 쌓인 신호가
+한꺼번에 쏟아집니다. 조용히 돌려두면 **다시 켠 시점 이후의 새 신호만** 옵니다.
+
+다시 받으려면:
+
+```python
+# bot/config.py
+ALERTS_ENABLED = True
+```
+
+커밋해서 푸시하면 다음 실행(최대 3분)부터 알림이 옵니다.
+
+| 스위치 | 위치 | 지금 |
+|---|---|---|
+| 전체 알림 | `config.ALERTS_ENABLED` | **False** (중단) |
+| 이메일만 | `config.EMAIL_ALERTS` | **False** (중단) |
+| 디스코드 | `DISCORD_WEBHOOK_URL` Secret | 설정돼 있음 |
+
+---
+
 ## 왜 TradingView 알림을 안 쓰나
 
 쓸 수 없기 때문입니다. TradingView 무료(Basic) 플랜은
@@ -37,9 +63,9 @@ Pine 스크립트로 만든 알림은 전부 "기술적 알림"이라 **무료 �
 
 ### 1-2. 이메일 알림 추가 (선택, 무료)
 
-> **지금은 꺼져 있습니다.** `bot/config.py` 의 `EMAIL_ALERTS = False` 때문에
-> Gmail 환경변수·Secret 이 그대로 있어도 메일이 나가지 않습니다.
-> 다시 켜려면 `EMAIL_ALERTS = True` 로 바꾸면 됩니다. 디스코드는 영향받지 않습니다.
+> **지금은 꺼져 있습니다.** `EMAIL_ALERTS = False` 이고, 그 위에
+> `ALERTS_ENABLED = False` 라 전체 알림이 중단돼 있습니다.
+> 이메일까지 다시 받으려면 둘 다 `True` 여야 합니다.
 
 디스코드와 **같은 신호를 이메일로도** 받을 수 있습니다. 둘 다 켜두면 한쪽이 막혀도
 다른 쪽이 도착합니다. Gmail 앱의 푸시 알림을 쓰는 방식이라 비용이 들지 않습니다.

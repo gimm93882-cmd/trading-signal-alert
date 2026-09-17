@@ -30,8 +30,13 @@ def main(argv=None):
     if args.backfill:
         return _backfill(symbols, args.backfill)
 
-    senders = [] if args.dry_run else notify.build_senders()
-    if senders:
+    muted = not getattr(config, "ALERTS_ENABLED", True)
+    senders = [] if (args.dry_run or muted) else notify.build_senders()
+    if muted and not args.dry_run:
+        # 전송만 끄고 실행은 그대로 둔다. 기준봉이 계속 밀려야
+        # 다시 켤 때 그동안의 신호가 한꺼번에 쏟아지지 않는다.
+        print("알림 중단됨 (config.ALERTS_ENABLED = False) — 신호는 계산만 하고 보내지 않습니다.")
+    elif senders:
         print("알림 채널: " + ", ".join(x.name for x in senders))
 
     state = _load_state()
